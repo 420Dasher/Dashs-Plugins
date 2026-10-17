@@ -63,6 +63,9 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
     private static IAddonLifecycle AddonLifecycle { get; set; } = null!;
 
     [PluginService]
+    private static IAgentLifecycle AgentLifecycle { get; set; } = null!;
+
+    [PluginService]
     private static IChatGui Chat { get; set; } = null!;
 
     private sealed record Shard(
@@ -166,6 +169,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         LoadResidentialNetworks();
         LoadCosmicLocalNetworks();
         LoadOverworldAetherytes();
+        InitializeMapResearch();
 
         Commands.AddHandler("/anet", new CommandInfo(OnCommand)
         {
@@ -189,6 +193,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         StopCosmicPath();
         // Temporary native addon capture removed.
         cosmicPhase = CosmicPhase.Idle;
+        DisposeMapResearch();
         Framework.Update -= Update;
 
         Pi.UiBuilder.Draw -= Draw;
@@ -432,6 +437,11 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
             case "settings":
             case "config":
                 settingsWindowOpen = true;
+                break;
+
+            case "map":
+                settingsWindowOpen = true;
+                ArmMapResearch();
                 break;
 
             case "housing":
@@ -1661,6 +1671,8 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
             config.ShowDebug = diagnostics;
             Save();
         }
+
+        DrawMapResearchControls();
 
         ImGui.Spacing();
         ImGui.Separator();
