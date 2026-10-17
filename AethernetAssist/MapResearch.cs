@@ -17,27 +17,29 @@ public sealed unsafe partial class Plugin
 
     private bool mapResearchArmed;
     private DateTime mapResearchUntil = DateTime.MinValue;
-    private string mapResearchLastSignature = "";
     private string mapResearchStatus = "Not recording.";
 
-    private const int MapResearchLimit = 60;
+    private const int MapResearchLimit = 120;
 
     private void InitializeMapResearch()
     {
-        AgentLifecycle.RegisterListener(
+        foreach (var eventType in new[]
+        {
             AgentEvent.PreReceiveEvent,
-            DalamudAgentId.Map,
-            OnMapResearchEvent
-        );
-
-        AgentLifecycle.RegisterListener(
+            AgentEvent.PostReceiveEvent,
             AgentEvent.PreReceiveEventWithResult,
-            DalamudAgentId.Map,
-            OnMapResearchEvent
-        );
+            AgentEvent.PostReceiveEventWithResult
+        })
+        {
+            AgentLifecycle.RegisterListener(
+                eventType,
+                DalamudAgentId.Map,
+                OnMapResearchEvent
+            );
+        }
 
         Log.Information(
-            "DEV8 TEST1: read-only Map agent listeners registered."
+            "DEV8 TEST2: read-only pre/post Map listeners registered."
         );
     }
 
@@ -50,16 +52,112 @@ public sealed unsafe partial class Plugin
     private void ArmMapResearch()
     {
         mapResearchEvents.Clear();
-        mapResearchLastSignature = "";
-        mapResearchUntil = DateTime.UtcNow.AddSeconds(45);
+
         mapResearchArmed = true;
+        mapResearchUntil = DateTime.UtcNow.AddSeconds(45);
 
         mapResearchStatus =
-            "Recording Map agent events for 45 seconds.";
+            "Recording map interactions for 45 seconds.";
 
         Log.Information(
-            "DEV8 TEST1: map research armed for 45 seconds."
+            "DEV8 TEST2: exact marker capture armed."
         );
+    }
+
+    private static string DescribeMapMarker(
+        NativeAgentMap* map,
+        uint context)
+    {
+        uint family = context >> 24;
+        uint slot = context & 0x00FFFFFFu;
+
+        int count = Math.Min(
+            (int)map->MapMarkerCount,
+            map->MapMarkers.Length
+        );
+
+        var result = new StringBuilder();
+
+        result.AppendLine(
+            $"PackedContext=0x{context:X8}; " +
+            $"Family={family}; Slot={slot}"
+        );
+
+        result.AppendLine(
+            $"MapMarkerCount={count}; " +
+            $"MapMarkerCapacity={map->MapMarkers.Length}"
+        );
+
+        // The relationship between packed context and
+        // MapMarkers[] is being investigated, not assumed.
+        if (slot >= (uint)count)
+        {
+            result.AppendLine(
+                "Candidate MapMarkers slot is outside populated range."
+            );
+
+            return result.ToString();
+        }
+
+        var marker = map->MapMarkers[(int)slot];
+
+        result.AppendLine(
+            $"CandidateSlot={slot}; " +
+            $"DataType={marker.DataType}; " +
+            $"DataKey={marker.DataKey}; " +
+            $"SubKey={marker.MapMarkerSubKey}"
+        );
+
+        result.AppendLine(
+            $"IconId={marker.MapMarker.IconId}; " +
+            $"SecondaryIconId={marker.MapMarker.SecondaryIconId}; " +
+            $"Flags={marker.MapMarker.IconFlags}; " +
+            $"Scale={marker.MapMarker.Scale}"
+        );
+
+        result.AppendLine(
+            $"MarkerX={marker.MapMarker.X}; " +
+            $"MarkerY={marker.MapMarker.Y}"
+        );
+
+        return result.ToString();
+    }
+
+    private string DescribeCandidateAetherytes(
+        ushort dataKey,
+        uint territory)
+    {
+        var results = new List<string>();
+
+        // Compare the observed DataKey with the existing
+        // Aethernet sheet catalogue. This is a candidate
+        // match, not a validated map-click destination.
+        foreach (var shard in networks.Values
+            .SelectMany(x => x)
+            .Where(x => x.Id == dataKey)
+            .Take(8))
+        {
+            results.Add(
+                $"Aethernet: {shard.Name} " +
+                $"(ID={shard.Id}, Territory={shard.Territory}, " +
+                $"Group={shard.Group})"
+            );
+        }
+
+        foreach (var stop in overworldStops.Values
+            .SelectMany(x => x)
+            .Where(x => x.Id == dataKey)
+            .Take(8))
+        {
+            results.Add(
+                $"Overworld: {stop.Name} " +
+                $"(ID={stop.Id}, Territory={stop.Territory})"
+            );
+        }
+
+        return results.Count == 0
+            ? "No direct Aetheryte-row match for DataKey."
+            : string.Join(" | ", results.Distinct());
     }
 
     private void OnMapResearchEvent(
@@ -72,7 +170,7 @@ public sealed unsafe partial class Plugin
         if (DateTime.UtcNow > mapResearchUntil)
         {
             mapResearchArmed = false;
-            mapResearchStatus = "Capture finished (45-second limit).";
+            mapResearchStatus = "Capture finished after 45 seconds.";
             return;
         }
 
@@ -81,10 +179,11 @@ public sealed unsafe partial class Plugin
 
         try
         {
-            // Never modify the event, result or AtkValues.
-            // Only copy bounded diagnostic information.
+            // Diagnostic reading only. Never modify arguments.
+            var entries = new List<string>();
 
-            string nativeValues = "";
+            bool hasContext = false;
+            uint packedContext = 0;
 
             if (received.AtkValues != 0)
             {
@@ -94,7 +193,6 @@ public sealed unsafe partial class Plugin
                 );
 
                 var values = (AtkValue*)received.AtkValues;
-                var entries = new List<string>();
 
                 for (int i = 0; i < count; i++)
                 {
@@ -102,116 +200,116 @@ public sealed unsafe partial class Plugin
 
                     string text = value.Type switch
                     {
-                        AtkValueType.Int
-                            => value.Int.ToString(),
-
-                        AtkValueType.UInt
-                            => value.UInt.ToString(),
-
+                        AtkValueType.Int => value.Int.ToString(),
+                        AtkValueType.UInt => value.UInt.ToString(),
                         _ => "(type " + value.Type + ")"
                     };
 
-                    entries.Add(i + "=" + text);
-                }
+                    entries.Add($"{i}={text}");
 
-                nativeValues = string.Join(", ", entries);
+                    if (i == 1)
+                    {
+                        if (value.Type == AtkValueType.UInt)
+                        {
+                            packedContext = value.UInt;
+                            hasContext = true;
+                        }
+                        else if (value.Type == AtkValueType.Int)
+                        {
+                            packedContext = unchecked((uint)value.Int);
+                            hasContext = true;
+                        }
+                    }
+                }
             }
 
-            uint selectedTerritory = 0;
-            uint selectedMap = 0;
+            string valuesText = string.Join(", ", entries);
+
             uint currentTerritory = 0;
             uint currentMap = 0;
+            uint selectedTerritory = 0;
+            uint selectedMap = 0;
+
             string tooltip = "";
-            string markerInfo = "";
+            string slotInfo = "No numeric marker context.";
+            string candidateInfo = "No candidate marker.";
+            string allAetheryteMarkers = "";
 
             var map = NativeAgentMap.Instance();
 
             if (map != null)
             {
-                selectedTerritory = map->SelectedTerritoryId;
-                selectedMap = map->SelectedMapId;
                 currentTerritory = map->CurrentTerritoryId;
                 currentMap = map->CurrentMapId;
+                selectedTerritory = map->SelectedTerritoryId;
+                selectedMap = map->SelectedMapId;
 
                 tooltip = Clean(map->TooltipString.ToString());
 
                 if (tooltip.Length > 160)
                     tooltip = tooltip.Substring(0, 160);
 
-                // Native MapMarkerInfo.DataType == 3 is
-                // associated with Aetheryte map markers.
-                // DataKey mapping is only a candidate
-                // until validated against in-game clicks.
-                var markerNames = new List<string>();
-
                 int markerCount = Math.Min(
                     (int)map->MapMarkerCount,
                     map->MapMarkers.Length
                 );
 
-                for (int i = 0; i < markerCount; i++)
+                if (hasContext)
+                {
+                    slotInfo = DescribeMapMarker(
+                        map,
+                        packedContext
+                    );
+
+                    uint slot = packedContext & 0x00FFFFFFu;
+
+                    if (slot < (uint)markerCount)
+                    {
+                        var marker = map->MapMarkers[(int)slot];
+
+                        candidateInfo = DescribeCandidateAetherytes(
+                            marker.DataKey,
+                            selectedTerritory
+                        );
+                    }
+                }
+
+                var markerSummaries = new List<string>();
+
+                for (int i = 0;
+                     i < markerCount && markerSummaries.Count < 16;
+                     i++)
                 {
                     var marker = map->MapMarkers[i];
 
                     if (marker.DataType != 3)
                         continue;
 
-                    string name = "?";
-
-                    if (overworldStops.TryGetValue(
-                        selectedTerritory,
-                        out var stops))
-                    {
-                        var possible = stops.FirstOrDefault(x =>
-                            x.Id == marker.DataKey
-                        );
-
-                        if (possible != null)
-                            name = possible.Name;
-                    }
-
-                    markerNames.Add(
-                        $"index={i}, key={marker.DataKey}, " +
+                    markerSummaries.Add(
+                        $"slot={i}, key={marker.DataKey}, " +
                         $"sub={marker.MapMarkerSubKey}, " +
-                        $"icon={marker.MapMarker.IconId}, " +
-                        $"possible={name}"
+                        $"icon={marker.MapMarker.IconId}"
                     );
-
-                    if (markerNames.Count >= 16)
-                        break;
                 }
 
-                markerInfo = string.Join(" | ", markerNames);
+                allAetheryteMarkers =
+                    string.Join(" | ", markerSummaries);
             }
-
-            string signature =
-                type + "/" +
-                received.EventKind + "/" +
-                received.ValueCount + "/" +
-                nativeValues + "/" +
-                selectedTerritory + "/" +
-                selectedMap + "/" +
-                tooltip;
-
-            // Suppress consecutive duplicate event messages
-            // without hiding later, distinct interactions.
-            if (signature == mapResearchLastSignature)
-                return;
-
-            mapResearchLastSignature = signature;
 
             string entry =
                 $"[{DateTime.Now:HH:mm:ss.fff}] {type}\n" +
                 $"EventKind={received.EventKind}; " +
                 $"ValueCount={received.ValueCount}\n" +
-                $"Values=[{nativeValues}]\n" +
+                $"Values=[{valuesText}]\n" +
                 $"ClientTerritory={Client.TerritoryType}; " +
                 $"MapCurrentTerritory={currentTerritory}; " +
                 $"MapCurrentId={currentMap}\n" +
                 $"MapSelectedTerritory={selectedTerritory}; " +
                 $"MapSelectedId={selectedMap}\n" +
-                $"Tooltip={tooltip}\n" +
-                $"NativeAetheryteMarkers=[{markerInfo}]";
+                $"TooltipAtEvent={tooltip}\n" +
+                $"CandidateMarker:\n{slotInfo}" +
+                $"CandidateAetheryteRows={candidateInfo}\n" +
+                $"Type3Markers=[{allAetheryteMarkers}]";
 
             mapResearchEvents.Add(entry);
 
@@ -219,23 +317,23 @@ public sealed unsafe partial class Plugin
             {
                 mapResearchArmed = false;
                 mapResearchStatus =
-                    "Capture reached 60 events and stopped.";
+                    "Capture limit reached (120 events).";
             }
             else
             {
                 mapResearchStatus =
-                    "Captured " + mapResearchEvents.Count +
-                    " distinct Map agent events.";
+                    $"Captured {mapResearchEvents.Count} map events.";
             }
         }
         catch (Exception ex)
         {
             mapResearchArmed = false;
+
             mapResearchStatus =
-                "Capture stopped after diagnostic read failure.";
+                "Diagnostic capture stopped after read failure.";
 
             Log.Warning(
-                "DEV8 map research diagnostic read failed: " +
+                "DEV8 TEST2 map research failed: " +
                 ex.Message
             );
         }
@@ -246,28 +344,20 @@ public sealed unsafe partial class Plugin
         var builder = new StringBuilder();
 
         builder.AppendLine(
-            "=== AETHERNETASSIST DEV8 TEST1 MAP RESEARCH ==="
+            "=== AETHERNETASSIST DEV8 TEST2 EXACT MARKERS ==="
         );
 
-        builder.AppendLine(
-            "Version: " + UiVersion
-        );
-
-        builder.AppendLine(
-            "Mode: READ ONLY - NO AUTOMATIC TRAVEL"
-        );
-
-        builder.AppendLine(
-            "Status: " + mapResearchStatus
-        );
-
-        builder.AppendLine(
-            "Events: " + mapResearchEvents.Count
-        );
+        builder.AppendLine("Version: " + UiVersion);
+        builder.AppendLine("Mode: READ ONLY");
+        builder.AppendLine("Status: " + mapResearchStatus);
+        builder.AppendLine("Events: " + mapResearchEvents.Count);
 
         for (int i = 0; i < mapResearchEvents.Count; i++)
         {
-            builder.AppendLine("--- Event " + (i + 1) + " ---");
+            builder.AppendLine(
+                "--- Event " + (i + 1) + " ---"
+            );
+
             builder.AppendLine(mapResearchEvents[i]);
         }
 
@@ -280,24 +370,25 @@ public sealed unsafe partial class Plugin
             DateTime.UtcNow > mapResearchUntil)
         {
             mapResearchArmed = false;
-            mapResearchStatus = "Capture finished (45-second limit).";
+            mapResearchStatus = "Capture finished after 45 seconds.";
         }
 
         ImGui.Spacing();
         ImGui.Separator();
 
         if (!ImGui.CollapsingHeader(
-            "MAP RESEARCH - DEV8 TEST1"))
+            "MAP RESEARCH - DEV8 TEST2"))
             return;
 
         ImGui.TextColored(
             NavMuted,
-            "Read-only native map interaction research."
+            "Exact marker resolution - read only"
         );
 
         ImGui.TextWrapped(
-            "Arm capture, click a map Aetheryte normally, " +
-            "then copy the results. No plugin travel is triggered."
+            "Captures native events before and after processing, " +
+            "including packed marker context, candidate slot, " +
+            "marker IDs, icon, coordinates and possible Aetheryte rows."
         );
 
         ImGui.Spacing();
@@ -346,7 +437,6 @@ public sealed unsafe partial class Plugin
         if (ImGui.SmallButton("Clear##map-research"))
         {
             mapResearchEvents.Clear();
-            mapResearchLastSignature = "";
             mapResearchStatus = "Capture cleared.";
         }
 
@@ -354,8 +444,6 @@ public sealed unsafe partial class Plugin
         {
             ImGui.Spacing();
 
-            // Display a preview without expanding the settings
-            // window into an enormous diagnostics view.
             if (ImGui.BeginChild(
                 "##MapResearchPreview",
                 new System.Numerics.Vector2(0f, 130f),
