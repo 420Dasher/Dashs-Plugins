@@ -1657,7 +1657,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         }
 
         ImGui.TextDisabled(
-            "Uses the live gil price. Disabled by default."
+            "Enabled by default. Uses live gil prices."
         );
 
         bool showUnlearned = config.ShowUnlearned;

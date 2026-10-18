@@ -10,9 +10,10 @@ public sealed class Configuration : IPluginConfiguration
     public bool ShowUnlearned { get; set; } = true;
     public bool ShowDebug { get; set; } = false;
 
-    // Free map routes start automatically by default.
-    // Paid map teleports require a persistent opt-in.
-    public bool AutoPaidMapRouting { get; set; } = false;
+    // Free and paid map routes start automatically by default.
+    // Existing saved preferences take precedence.
+    // Users can disable automatic paid routing in Settings.
+    public bool AutoPaidMapRouting { get; set; } = true;
 
     // Restore the route confirmation window for debugging.
     public bool ConfirmMapRoutes { get; set; } = false;
