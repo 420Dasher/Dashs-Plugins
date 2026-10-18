@@ -33,6 +33,8 @@ public sealed unsafe partial class Plugin
         mapRouteNextGoal = 0;
         mapRoutePathAttemptNumber = 0;
         mapRoutePathSourceAddress = 0;
+        mapRouteDirectAttempted = false;
+        mapRouteDirectActive = false;
     }
 
     private void BuildMapRoutePathGoals(IGameObject crystal)
@@ -338,6 +340,7 @@ public sealed unsafe partial class Plugin
                 if (alternate != null)
                 {
                     MapRouteRememberLocalSource(alternate);
+                    mapRouteDirectAttempted = false;
 
                     mapRouteWalkingToTarget =
                         alternate.BaseId == target.Id;

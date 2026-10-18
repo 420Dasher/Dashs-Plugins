@@ -535,6 +535,7 @@ public sealed unsafe partial class Plugin
         mapRouteWalkOwnsPath = false;
         mapRouteWalkPathTask = null;
         mapRouteWalkAttempted = false;
+        mapRouteDirectActive = false;
 
         if (!owned)
             return;
@@ -600,6 +601,13 @@ public sealed unsafe partial class Plugin
             );
             return false;
         }
+
+        // Short and apparently unobstructed approaches
+        // use direct movement first. Every other situation
+        // retains the existing navmesh pathfinder.
+        if (TryStartMapRouteDirectApproach(
+            crystal, player.Position))
+            return true;
 
         try
         {
@@ -813,6 +821,12 @@ public sealed unsafe partial class Plugin
                 );
             }
 
+            return;
+        }
+
+        if (mapRouteDirectActive)
+        {
+            TickMapRouteDirectApproach(main);
             return;
         }
 
