@@ -19,6 +19,12 @@ public sealed unsafe partial class Plugin
     private DateTime mapResearchUntil = DateTime.MinValue;
     private string mapResearchStatus = "Not recording.";
 
+    // Repeated native hover callbacks must not exhaust
+    // the diagnostic event buffer each frame.
+    private string mapResearchLastHoverSignature = "";
+    private int mapResearchObservedCallbacks;
+    private int mapResearchSuppressedHoverCallbacks;
+
     private const int MapResearchLimit = 120;
 
     private void InitializeMapResearch()
@@ -39,7 +45,7 @@ public sealed unsafe partial class Plugin
         }
 
         Log.Information(
-            "DEV8 TEST2: read-only pre/post Map listeners registered."
+            "DEV8 TEST2 FIX1: deduplicated Map listeners registered."
         );
     }
 
@@ -52,6 +58,9 @@ public sealed unsafe partial class Plugin
     private void ArmMapResearch()
     {
         mapResearchEvents.Clear();
+        mapResearchLastHoverSignature = "";
+        mapResearchObservedCallbacks = 0;
+        mapResearchSuppressedHoverCallbacks = 0;
 
         mapResearchArmed = true;
         mapResearchUntil = DateTime.UtcNow.AddSeconds(45);
@@ -60,7 +69,7 @@ public sealed unsafe partial class Plugin
             "Recording map interactions for 45 seconds.";
 
         Log.Information(
-            "DEV8 TEST2: exact marker capture armed."
+            "DEV8 TEST2 FIX1: deduplicated marker capture armed."
         );
     }
 
@@ -179,6 +188,84 @@ public sealed unsafe partial class Plugin
 
         try
         {
+            mapResearchObservedCallbacks++;
+
+            // Native action 9 is observed repeatedly while
+            // hovering over the same map marker.
+            // Keep its POST event only when the hovered
+            // marker, tooltip, or selected map changes.
+            // Preserve PRE and POST for other actions,
+            // including the observed right-click action 11.
+            if (received.AtkValues != 0 &&
+                received.ValueCount >= 2)
+            {
+                var hoverValues = (AtkValue*)received.AtkValues;
+
+                uint action = hoverValues[0].Type switch
+                {
+                    AtkValueType.Int =>
+                        unchecked((uint)hoverValues[0].Int),
+
+                    AtkValueType.UInt =>
+                        hoverValues[0].UInt,
+
+                    _ => uint.MaxValue
+                };
+
+                if (action == 9u)
+                {
+                    if (type == AgentEvent.PreReceiveEvent ||
+                        type == AgentEvent.PreReceiveEventWithResult)
+                    {
+                        mapResearchSuppressedHoverCallbacks++;
+                        return;
+                    }
+
+                    if (hoverValues[1].Type == AtkValueType.UInt ||
+                        hoverValues[1].Type == AtkValueType.Int)
+                    {
+                        uint context = hoverValues[1].Type ==
+                            AtkValueType.UInt
+                                ? hoverValues[1].UInt
+                                : unchecked((uint)hoverValues[1].Int);
+
+                        var nativeMap = NativeAgentMap.Instance();
+
+                        uint selectedMapId = nativeMap == null
+                            ? 0u
+                            : nativeMap->SelectedMapId;
+
+                        uint selectedTerritoryId = nativeMap == null
+                            ? 0u
+                            : nativeMap->SelectedTerritoryId;
+
+                        string hoverTooltip = nativeMap == null
+                            ? ""
+                            : Clean(nativeMap->TooltipString.ToString());
+
+                        string signature =
+                            $"{context:X8}/" +
+                            $"{selectedTerritoryId}/" +
+                            $"{selectedMapId}/" +
+                            hoverTooltip;
+
+                        if (signature == mapResearchLastHoverSignature)
+                        {
+                            mapResearchSuppressedHoverCallbacks++;
+                            return;
+                        }
+
+                        mapResearchLastHoverSignature = signature;
+                    }
+                }
+                else
+                {
+                    // Allow a fresh hover snapshot after
+                    // any different native map action.
+                    mapResearchLastHoverSignature = "";
+                }
+            }
+
             // Diagnostic reading only. Never modify arguments.
             var entries = new List<string>();
 
@@ -322,7 +409,9 @@ public sealed unsafe partial class Plugin
             else
             {
                 mapResearchStatus =
-                    $"Captured {mapResearchEvents.Count} map events.";
+                    $"Captured {mapResearchEvents.Count} distinct map events. " +
+                    $"Skipped {mapResearchSuppressedHoverCallbacks} " +
+                    "duplicate hover callbacks.";
             }
         }
         catch (Exception ex)
@@ -344,13 +433,21 @@ public sealed unsafe partial class Plugin
         var builder = new StringBuilder();
 
         builder.AppendLine(
-            "=== AETHERNETASSIST DEV8 TEST2 EXACT MARKERS ==="
+            "=== AETHERNETASSIST DEV8 TEST2 FIX1 EXACT MARKERS ==="
         );
 
         builder.AppendLine("Version: " + UiVersion);
         builder.AppendLine("Mode: READ ONLY");
         builder.AppendLine("Status: " + mapResearchStatus);
         builder.AppendLine("Events: " + mapResearchEvents.Count);
+        builder.AppendLine(
+            "Observed native callbacks: " +
+            mapResearchObservedCallbacks
+        );
+        builder.AppendLine(
+            "Suppressed hover callbacks: " +
+            mapResearchSuppressedHoverCallbacks
+        );
 
         for (int i = 0; i < mapResearchEvents.Count; i++)
         {
@@ -377,7 +474,7 @@ public sealed unsafe partial class Plugin
         ImGui.Separator();
 
         if (!ImGui.CollapsingHeader(
-            "MAP RESEARCH - DEV8 TEST2"))
+            "MAP RESEARCH - DEV8 TEST2 FIX1"))
             return;
 
         ImGui.TextColored(
@@ -423,6 +520,11 @@ public sealed unsafe partial class Plugin
 
         ImGui.TextUnformatted(
             $"Recorded events: {mapResearchEvents.Count}"
+        );
+
+        ImGui.TextDisabled(
+            $"Suppressed duplicate hover callbacks: " +
+            mapResearchSuppressedHoverCallbacks
         );
 
         if (ImGui.Button("Copy map diagnostics"))
