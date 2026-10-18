@@ -42,6 +42,19 @@ internal sealed class AetherphoneBridge
     private readonly List<LiveMission> missions = new();
     private readonly List<RoundObservation> roundObservations = new();
 
+    private readonly Dictionary<string, string> stageGameKinds =
+        new(StringComparer.Ordinal);
+
+    private static readonly string[] StageGameIds =
+    {
+        "bartender", "blackjack", "holdem", "dealerholdem",
+        "slots", "slots.bird", "slots.cascade",
+        "slots.moogle", "slots.gamble", "scratch",
+        "bingo", "wheel", "mines", "dice", "limbo",
+        "keno", "hilo", "race", "plinko", "dicetable",
+        "deathroll", "raffle", "book"
+    };
+
     public string Status { get; private set; } = "Waiting for Aetherphone";
     public string Version { get; private set; } = "--";
 
@@ -422,6 +435,124 @@ internal sealed class AetherphoneBridge
         return "blackjack:" + roomId + "#" + index + ":" + date;
     }
 
+    private string StageGameKind(object app, object? gameName)
+    {
+        string key = Member(gameName, "Key") as string ?? "";
+
+        if (key.Length == 0)
+            return "";
+
+        if (stageGameKinds.TryGetValue(key, out var cached))
+            return cached;
+
+        string result = "";
+
+        try
+        {
+            var namesType = app.GetType().Assembly.GetType(
+                "Aetherphone.Apps.Casino.CasinoGameNames", false);
+
+            var of = namesType?.GetMethod(
+                "Of", StaticFlags, null,
+                new[] { typeof(string) }, null);
+
+            if (of is not null)
+            {
+                foreach (string id in StageGameIds)
+                {
+                    object? named = of.Invoke(null, new object[] { id });
+
+                    if (string.Equals(
+                        Member(named, "Key") as string,
+                        key, StringComparison.Ordinal))
+                    {
+                        result = "casino." + id;
+                        break;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Unknown game names are ignored rather than
+            // assigned potentially incorrect statistics.
+        }
+
+        stageGameKinds[key] = result;
+        return result;
+    }
+
+    private void CollectStageRounds(object app)
+    {
+        // Aetherphone's own 50-entry settled-bets ring buffer.
+        // Only read; never mutate the log or request wagers.
+        var stage = Member(app, "stage");
+        var log = Member(stage, "Bets");
+
+        if (log is null)
+            return;
+
+        var newest = log.GetType().GetMethod(
+            "Newest", InstanceFlags, null,
+            new[] { typeof(int) }, null);
+
+        if (newest is null)
+            return;
+
+        int count = (int)Math.Clamp(
+            Number(Member(log, "Count")) ?? 0,
+            0L, 50L);
+
+        for (int index = 0; index < count; index++)
+        {
+            object? record;
+
+            try
+            {
+                record = newest.Invoke(log, new object[] { index });
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (record is null)
+                continue;
+
+            string id = Member(record, "RoundId") as string ?? "";
+
+            // Empty IDs cannot be reconciled against the history.
+            if (id.Length == 0)
+                continue;
+
+            string kind = StageGameKind(
+                app, Member(record, "Game"));
+
+            // Blackjack already has a verified live hand adapter.
+            // Do not count its shared stage entry a second time.
+            if (kind.Length == 0 || kind == "casino.blackjack")
+                continue;
+
+            long stake = Number(Member(record, "Stake")) ?? 0;
+            long payout = Number(Member(record, "Payout")) ?? 0;
+            long milliseconds =
+                Number(Member(record, "SettledAtUnixMs")) ?? 0;
+
+            if (stake <= 0 || milliseconds <= 0)
+                continue;
+
+            roundObservations.Add(new RoundObservation(
+                "round:" + id,
+                kind,
+                "Live Aetherphone settled bet",
+                stake,
+                payout,
+                payout - stake,
+                milliseconds / 1000,
+                true));
+        }
+    }
+
     private void CollectRoundObservations(object app)
     {
         var history = Member(app, "history");
@@ -463,6 +594,10 @@ internal sealed class AetherphoneBridge
                     true));
             }
         }
+
+        // Read the shared live settlement log before the
+        // independent hosted Blackjack hand history.
+        CollectStageRounds(app);
 
         // Hosted Blackjack history uses room + hand index as
         // identity. It has net but no exact stake/payout.

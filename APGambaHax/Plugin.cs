@@ -48,6 +48,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private bool mainOpen;
     private bool settingsOpen;
+    private bool statsOpen;
     private Page page = Page.Overview;
 
     private uint[] sampledTheme = Array.Empty<uint>();
@@ -282,6 +283,7 @@ public sealed class Plugin : IDalamudPlugin
 
         DrawSettings();
         DrawMain();
+        DrawStatistics();
     }
 
     private void DrawMain()
@@ -305,7 +307,13 @@ public sealed class Plugin : IDalamudPlugin
                 ImGuiWindowFlags.NoCollapse))
             {
                 ImGui.TextDisabled(VersionText);
-                ImGui.SameLine(ImGui.GetWindowWidth() - 91f);
+
+                ImGui.SameLine(ImGui.GetWindowWidth() - 175f);
+
+                if (ImGui.SmallButton("Statistics"))
+                    statsOpen = true;
+
+                ImGui.SameLine();
 
                 if (ImGui.SmallButton("Settings"))
                     settingsOpen = true;
@@ -421,16 +429,15 @@ public sealed class Plugin : IDalamudPlugin
             $"Enabled modules: {cfg.ModulesEnabled.Count(x => x)} / 6");
 
         ImGui.Spacing();
-        ImGui.Spacing();
-        Heading("ROUNDTRACKER - CURRENT SESSION");
 
-        ImGui.TextDisabled(roundTracker.Status);
-        DrawRoundStats("");
+        if (ImGui.Button("Open statistics##OverviewStats"))
+            statsOpen = true;
 
-        ImGui.Spacing();
         ImGui.TextDisabled(
-            "Observed settled rounds only; not a lifetime ledger.");
-        ImGui.TextDisabled("Wager automation is disabled by default.");
+            "Game statistics are available in a separate window.");
+
+        ImGui.TextDisabled(
+            "Wager automation is disabled by default.");
     }
 
     private static string BonusLabel(string kind) =>
@@ -710,24 +717,13 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.Spacing();
         ImGui.Separator();
 
-        Heading("SESSION");
-
-        ImGui.TextUnformatted(
-            $"Wagers: {automation.Wagers} | Perfect: {automation.PerfectWagers}");
-
-        ImGui.TextUnformatted(
-            $"Net: {automation.SessionNet:+#,0;-#,0;0} chips" +
-            $" | Practice: {automation.PracticeRuns}");
+        Heading("WAGER SAFETY");
 
         if (automation.NetWinToday.HasValue)
         {
             ImGui.TextDisabled(
-                $"Server Barkeep net ({automation.DailyObservationSource}): " +
-                $"{automation.NetWinToday.Value:N0} / " +
+                $"Server daily net: {automation.NetWinToday.Value:N0} / " +
                 $"{CasinoProfitLimits.BarkeepDailyNetCap:N0} chips");
-
-            ImGui.TextDisabled(
-                $"Profitable perfect shifts left: {automation.DailyShiftsRemaining}");
         }
         else
         {
@@ -735,35 +731,20 @@ public sealed class Plugin : IDalamudPlugin
                 "Server daily net: unconfirmed.");
         }
 
-        if (automation.HistoryLoaded)
-        {
-            ImGui.TextDisabled(
-                $"History positive winnings (UTC day): " +
-                $"{automation.HistoryPositiveNet:N0} chips");
-
-            ImGui.TextDisabled(
-                $"History signed net: " +
-                $"{automation.HistorySignedNet:+#,0;-#,0;0} chips" +
-                $" | {automation.HistoryRounds} settled round(s)");
-
-            ImGui.TextDisabled(automation.HistoryHasMore
-                ? "History incomplete; additional pages exist."
-                : "History loaded; server reset time unverified.");
-        }
-        else
-        {
-            ImGui.TextDisabled(
-                "Waiting for Aetherphone history.");
-        }
-
         if (automation.DailyCapConfirmed)
             ImGui.TextDisabled(
                 "Daily Barkeep cap confirmed by server.");
         else if (automation.HistoryCapSuspected)
             ImGui.TextDisabled(
-                "Possible daily cap from history - batch locked.");
+                "Possible daily cap in history - batch locked.");
 
-        ImGui.TextWrapped("Last wager: " + automation.LastResult);
+        ImGui.TextWrapped(
+            "Last wager: " + automation.LastResult);
+
+        if (ImGui.SmallButton("Open statistics##BarkeepStats"))
+            statsOpen = true;
+
+        ImGui.Spacing();
 
         if (automation.HasBatch)
         {
@@ -948,6 +929,46 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    private static string MissionGuidance(LiveMission mission)
+    {
+        string metric = mission.Metric.Trim().ToLowerInvariant();
+        string game = mission.GameKind.Trim().ToLowerInvariant();
+
+        bool unrestricted = game.Length == 0;
+        bool barkeepOnly =
+            game == "bartender" || game == "casino.bartender";
+
+        return metric switch
+        {
+            "wins" when unrestricted =>
+                "Barkeep: confirmed for unrestricted profitable wins.",
+
+            "wins" when barkeepOnly =>
+                "Barkeep: compatible; restricted variant unverified.",
+
+            "rounds" when unrestricted =>
+                "Barkeep: likely compatible; server confirmation pending.",
+
+            "rounds" when barkeepOnly =>
+                "Barkeep: likely compatible; server confirmation pending.",
+
+            "games" =>
+                "Barkeep may count as one distinct game; verify on server.",
+
+            "hits" =>
+                "Multiplier objective: normal perfect Barkeep is 2x.",
+
+            "maxbet" =>
+                "Manual only; maximum-bet automation is not planned.",
+
+            "hosted" =>
+                "Hosted-table participation required; manual for now.",
+
+            _ =>
+                "Tracking only; no verified automatic completion route."
+        };
+    }
+
     private void DrawMissions()
     {
         Heading("MISSIONS");
@@ -1000,11 +1021,7 @@ public sealed class Plugin : IDalamudPlugin
             $" | Claimed: {claimed}");
 
         ImGui.TextDisabled(
-            "Local Blackjack rounds observed this session: " +
-            roundTracker.Totals("casino.blackjack").Rounds);
-
-        ImGui.TextDisabled(
-            "Local observations are not server mission progress.");
+            "Mission progress is confirmed by Aetherphone's server.");
 
         if (bridge.MissionsResetsAtUnix > 0)
         {
@@ -1047,6 +1064,9 @@ public sealed class Plugin : IDalamudPlugin
 
                 ImGui.TextDisabled(
                     $"Reward: {mission.Reward:N0} chips");
+
+                ImGui.TextWrapped(
+                    "Assist: " + MissionGuidance(mission));
 
                 if (mission.Claimed)
                 {
@@ -1134,15 +1154,13 @@ public sealed class Plugin : IDalamudPlugin
 
     private void DrawBlackjack()
     {
-        Heading("BLACKJACK - ROUNDTRACKER DEV1");
+        Heading("BLACKJACK");
 
-        ImGui.TextUnformatted(
-            "Tracker: " + roundTracker.Status);
+        ImGui.TextDisabled(
+            "Live hand tracking: " + roundTracker.Status);
 
-        ImGui.Spacing();
-        Heading("CHIP GAME SESSION");
-
-        DrawRoundStats("casino.blackjack");
+        if (ImGui.Button("Open Blackjack statistics"))
+            statsOpen = true;
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -1176,6 +1194,192 @@ public sealed class Plugin : IDalamudPlugin
         else
             ImGui.TextDisabled(
                 "Live state and progress tracking are planned.");
+    }
+
+    private void DrawGameStatistics(string label, string kind)
+    {
+        var data = roundTracker.Totals(kind);
+
+        if (ImGui.CollapsingHeader(
+            $"{label} ({data.Rounds:N0})##Stats-{kind}"))
+        {
+            DrawRoundStats(kind);
+
+            if (data.Rounds == 0)
+                ImGui.TextDisabled(
+                    "No settled rounds observed this session.");
+
+            ImGui.Spacing();
+        }
+    }
+
+    private void DrawStatistics()
+    {
+        if (!statsOpen)
+            return;
+
+        Theme.Push(cfg);
+
+        try
+        {
+            ImGui.SetNextWindowSize(
+                new Vector2(490f, 530f), ImGuiCond.FirstUseEver);
+
+            bool open = statsOpen;
+
+            if (ImGui.Begin(
+                "APGambaHax - Statistics###APGambaHaxStatistics",
+                ref open, ImGuiWindowFlags.NoCollapse))
+            {
+                Heading("UNIVERSAL ROUNDTRACKER");
+
+                ImGui.TextDisabled(roundTracker.Status);
+
+                ImGui.TextDisabled(
+                    "Read-only observations from Aetherphone.");
+
+                ImGui.Spacing();
+
+                if (ImGui.CollapsingHeader("All games##StatsAll"))
+                {
+                    DrawRoundStats("");
+                    ImGui.Spacing();
+                }
+
+                DrawGameStatistics(
+                    "Blackjack", "casino.blackjack");
+
+                var barkeepStats =
+                    roundTracker.Totals("casino.bartender");
+
+                if (ImGui.CollapsingHeader(
+                    $"Barkeep ({barkeepStats.Rounds:N0})##StatsBarkeep"))
+                {
+                    Heading("SETTLED CHIP WAGERS");
+
+                    DrawRoundStats("casino.bartender");
+
+                    ImGui.Spacing();
+                    Heading("AUTOMATION SESSION");
+
+                    ImGui.TextUnformatted(
+                        $"Wagers: {automation.Wagers}  |  " +
+                        $"Perfect: {automation.PerfectWagers}  |  " +
+                        $"Practice: {automation.PracticeRuns}");
+
+                    ImGui.TextUnformatted(
+                        $"Automation net: " +
+                        $"{automation.SessionNet:+#,0;-#,0;0} chips");
+
+                    ImGui.Spacing();
+                    Heading("DAILY / HISTORY OBSERVATIONS");
+
+                    if (automation.NetWinToday.HasValue)
+                    {
+                        ImGui.TextUnformatted(
+                            $"Server daily net ({automation.DailyObservationSource}): " +
+                            $"{automation.NetWinToday.Value:N0} / " +
+                            $"{CasinoProfitLimits.BarkeepDailyNetCap:N0}");
+
+                        ImGui.TextDisabled(
+                            $"Perfect shifts remaining: " +
+                            $"{automation.DailyShiftsRemaining}");
+                    }
+                    else
+                    {
+                        ImGui.TextDisabled(
+                            "Server daily net unconfirmed.");
+                    }
+
+                    if (automation.HistoryLoaded)
+                    {
+                        ImGui.TextUnformatted(
+                            $"History positive net (UTC day, capped): " +
+                            $"{automation.HistoryPositiveNet:N0} chips");
+
+                        ImGui.TextUnformatted(
+                            $"History signed net: " +
+                            $"{automation.HistorySignedNet:+#,0;-#,0;0} chips");
+
+                        ImGui.TextDisabled(
+                            $"History rounds: {automation.HistoryRounds}" +
+                            (automation.HistoryHasMore
+                                ? " | More history pages exist"
+                                : ""));
+                    }
+                    else
+                    {
+                        ImGui.TextDisabled(
+                            "Waiting for Aetherphone round history.");
+                    }
+
+                    ImGui.Spacing();
+                }
+
+                if (ImGui.CollapsingHeader(
+                    "Originals##StatsOriginals"))
+                {
+                    DrawGameStatistics("Mines", "casino.mines");
+                    DrawGameStatistics("Dice", "casino.dice");
+                    DrawGameStatistics("Limbo", "casino.limbo");
+                    DrawGameStatistics("Keno", "casino.keno");
+                    DrawGameStatistics("Hi-Lo", "casino.hilo");
+                }
+
+                if (ImGui.CollapsingHeader(
+                    "Slots##StatsSlots"))
+                {
+                    DrawGameStatistics("Slots", "casino.slots");
+                    DrawGameStatistics(
+                        "Bird Slots", "casino.slots.bird");
+                    DrawGameStatistics(
+                        "Cascade Slots", "casino.slots.cascade");
+                    DrawGameStatistics(
+                        "Moogle Slots", "casino.slots.moogle");
+                    DrawGameStatistics(
+                        "Gamble", "casino.slots.gamble");
+                }
+
+                if (ImGui.CollapsingHeader(
+                    "Other casino games##StatsOther"))
+                {
+                    DrawGameStatistics("Scratch", "casino.scratch");
+                    DrawGameStatistics("Plinko", "casino.plinko");
+                    DrawGameStatistics("Wheel", "casino.wheel");
+                    DrawGameStatistics("Bingo", "casino.bingo");
+                    DrawGameStatistics("Racing", "casino.race");
+                    DrawGameStatistics("Hold'em", "casino.holdem");
+                    DrawGameStatistics(
+                        "Dealer Hold'em", "casino.dealerholdem");
+                    DrawGameStatistics(
+                        "Dice Table", "casino.dicetable");
+                    DrawGameStatistics(
+                        "Deathroll", "casino.deathroll");
+                    DrawGameStatistics("Raffle", "casino.raffle");
+                    DrawGameStatistics("Book", "casino.book");
+                }
+
+                ImGui.Spacing();
+                ImGui.Separator();
+
+                ImGui.TextDisabled(
+                    "Statistics begin when APGambaHax loads.");
+
+                ImGui.TextWrapped(
+                    "Games without an accessible unique settlement ID " +
+                    "may not appear until Aetherphone history provides one.");
+
+                ImGui.TextDisabled(
+                    "Practice wagers and rewards are excluded.");
+            }
+
+            ImGui.End();
+            statsOpen = open;
+        }
+        finally
+        {
+            ImGui.PopStyleColor(Theme.PushCount);
+        }
     }
 
     private void DrawSettings()
