@@ -35,6 +35,7 @@ public sealed unsafe partial class Plugin
         mapRoutePathSourceAddress = 0;
         mapRouteDirectAttempted = false;
         mapRouteDirectActive = false;
+        mapRouteDirectStopRange = 0f;
     }
 
     private void BuildMapRoutePathGoals(IGameObject crystal)

@@ -28,8 +28,14 @@ public sealed unsafe partial class Plugin
 
     private bool MapRouteDirectCorridorLooksWalkable(
         Vector3 start,
-        Vector3 goal)
+        Vector3 goal,
+        Vector3 crystalPosition,
+        out Vector3 safeGoal,
+        out float stoppingRange)
     {
+        safeGoal = goal;
+        stoppingRange = 0f;
+
         float length = Vector3.Distance(start, goal);
 
         if (length <= 0.1f)
@@ -41,13 +47,12 @@ public sealed unsafe partial class Plugin
             18
         );
 
+        Vector3 lastAccepted = start;
+
         try
         {
             var query = Pi.GetIpcSubscriber<
-                Vector3,
-                float,
-                float,
-                Vector3?>(
+                Vector3, float, float, Vector3?>(
                     "vnavmesh.Query.Mesh.NearestPoint"
                 );
 
@@ -55,10 +60,7 @@ public sealed unsafe partial class Plugin
             {
                 float t = (float)i / samples;
 
-                Vector3 probe = Vector3.Lerp(
-                    start, goal, t
-                );
-
+                Vector3 probe = Vector3.Lerp(start, goal, t);
                 Vector3? nearest = query.InvokeFunc(
                     probe, 2.5f, 4f
                 );
@@ -66,15 +68,14 @@ public sealed unsafe partial class Plugin
                 if (!nearest.HasValue)
                 {
                     Log.Information(
-                        "DEV9 TEST5: direct corridor rejected: " +
-                        "missing mesh at sample " +
+                        "DEV9 FIX2: corridor has no mesh at " +
                         i + "/" + samples
                     );
 
                     return false;
                 }
 
-                var projected = nearest.Value;
+                Vector3 projected = nearest.Value;
 
                 if (!float.IsFinite(projected.X) ||
                     !float.IsFinite(projected.Y) ||
@@ -90,43 +91,70 @@ public sealed unsafe partial class Plugin
                     probe.Y - projected.Y
                 );
 
-                // Intermediate corridor samples must remain
-                // close to the navigation mesh.
-                //
-                // The last sample is our stopping point near
-                // the crystal, not the crystal's center.
-                // Allow a small, nearly-level navmesh seam
-                // there without weakening the whole route.
-                bool finalSample = i == samples;
-
-                float horizontalLimit =
-                    finalSample && vertical <= 0.5f
-                        ? 3.2f
-                        : 1.5f;
-
-                if (horizontal > horizontalLimit ||
-                    vertical > 2.3f)
+                // Never drive toward a goal that is more
+                // than 1.5y from its nearest mesh surface.
+                // The relaxed 3.2y endpoint rule is removed.
+                if (horizontal > 1.5f || vertical > 2.3f)
                 {
+                    // The final sample may be near a platform
+                    // boundary. Try ending at the preceding
+                    // accepted mesh point, but only if it is
+                    // already inside the configured interaction
+                    // radius with a small safety margin.
+                    if (i == samples &&
+                        horizontal <= 3.2f &&
+                        vertical <= 0.5f)
+                    {
+                        float distance = Vector3.Distance(
+                            lastAccepted, crystalPosition
+                        );
+
+                        float maximumRange = MathF.Min(
+                            10.4f,
+                            config.OpenRange - 0.45f
+                        );
+
+                        if (distance <= maximumRange)
+                        {
+                            safeGoal = lastAccepted;
+
+                            stoppingRange = MathF.Max(
+                                MapRouteSafeInteractionRange(),
+                                MathF.Min(
+                                    maximumRange,
+                                    distance + 0.3f
+                                )
+                            );
+
+                            Log.Information(
+                                "DEV9 FIX2: DIRECT GOAL CLIPPED; " +
+                                $"unsafe offset={horizontal:0.00}y; " +
+                                $"clipped crystal distance={distance:0.00}y; " +
+                                $"stop range={stoppingRange:0.00}y; " +
+                                $"goal={safeGoal}."
+                            );
+
+                            return true;
+                        }
+
+                        Log.Information(
+                            "DEV9 FIX2: clipped point outside " +
+                            $"interaction range: {distance:0.00}y."
+                        );
+                    }
+
                     Log.Information(
-                        "DEV9 TEST5 FIX1: direct corridor rejected " +
-                        $"at {i}/{samples}: " +
-                        $"horizontal={horizontal:0.00}, " +
-                        $"limit={horizontalLimit:0.00}, " +
+                        "DEV9 FIX2: direct corridor rejected at " +
+                        $"{i}/{samples}; horizontal={horizontal:0.00}, " +
                         $"vertical={vertical:0.00}."
                     );
 
                     return false;
                 }
 
-                if (finalSample && horizontal > 1.5f)
-                {
-                    Log.Information(
-                        "DEV9 TEST5 FIX1: ENDPOINT SEAM ACCEPTED; " +
-                        $"horizontal={horizontal:0.00}, " +
-                        $"vertical={vertical:0.00}; " +
-                        "intermediate samples passed."
-                    );
-                }
+                // Use a verified mesh projection, not the
+                // position beyond the last valid sample.
+                lastAccepted = projected;
             }
 
             return true;
@@ -134,7 +162,7 @@ public sealed unsafe partial class Plugin
         catch (Exception ex)
         {
             Log.Warning(
-                "DEV9 TEST5: corridor validation unavailable: " +
+                "DEV9 FIX2: corridor query failed: " +
                 ex.Message
             );
 
@@ -194,7 +222,11 @@ public sealed unsafe partial class Plugin
         );
 
         if (!MapRouteDirectCorridorLooksWalkable(
-            start, goal))
+            start,
+            goal,
+            crystal.Position,
+            out Vector3 movementGoal,
+            out float clippedStopRange))
         {
             Log.Information(
                 "DEV9 TEST5: direct approach unsuitable; " +
@@ -231,13 +263,14 @@ public sealed unsafe partial class Plugin
                 object>(
                     "vnavmesh.Path.MoveTo"
                 ).InvokeAction(
-                    new List<Vector3> { goal },
+                    new List<Vector3> { movementGoal },
                     false
                 );
 
             mapRouteWalkOwnsPath = true;
             mapRouteWalkAttempted = true;
             mapRouteDirectActive = true;
+            mapRouteDirectStopRange = clippedStopRange;
 
             mapRouteDirectStarted = DateTime.UtcNow;
             mapRouteDirectLastProgress = mapRouteDirectStarted;
@@ -254,7 +287,8 @@ public sealed unsafe partial class Plugin
                 "DEV9 TEST5: DIRECT APPROACH STARTED; " +
                 $"source={crystal.BaseId}; " +
                 $"distance={Vector3.Distance(start, crystal.Position):0.0}y; " +
-                $"waypoint={goal}."
+                $"waypoint={movementGoal}; " +
+                $"stopRange={clippedStopRange:0.00}."
             );
 
             return true;
@@ -280,6 +314,7 @@ public sealed unsafe partial class Plugin
 
         // Stops only movement that this route started.
         StopMapRouteWalk();
+        mapRouteDirectStopRange = 0f;
 
         // Do not attempt the direct approach again to the
         // same source. BeginMapRouteWalk will use navmesh.

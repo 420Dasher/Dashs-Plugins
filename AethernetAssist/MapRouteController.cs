@@ -43,6 +43,10 @@ public sealed unsafe partial class Plugin
     private DateTime mapRouteStillSince = DateTime.MinValue;
     private Vector3 mapRouteStillAnchor;
 
+    // Only nonzero when a direct route has been clipped to
+    // a verified mesh point near its source crystal.
+    private float mapRouteDirectStopRange;
+
     private bool MapRouteCanStart()
     {
         return mapRoutePhase == MapRoutePhase.Idle &&
@@ -154,9 +158,13 @@ public sealed unsafe partial class Plugin
                 return false;
         }
 
+        float stoppingRange = mapRouteDirectStopRange > 0f
+            ? mapRouteDirectStopRange
+            : MapRouteSafeInteractionRange();
+
         return Vector3.Distance(
             player.Position, nearby.Position
-        ) <= MapRouteSafeInteractionRange();
+        ) <= stoppingRange;
     }
     private bool MapRouteAtMain(Shard main)
     {
