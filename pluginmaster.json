@@ -90,7 +90,7 @@
         "InternalName":  "AethernetAssist",
         "Name":  "AethernetAssist",
         "AssemblyVersion":  "0.2.0.0",
-        "TestingAssemblyVersion":  "0.3.11.0",
+        "TestingAssemblyVersion":  "0.3.12.0",
         "DalamudApiLevel":  15,
         "TestingDalamudApiLevel":  15,
         "ApplicableVersion":  "any",
@@ -103,7 +103,7 @@
         "IsTestingExclusive":  false,
         "Punchline":  "Aethernet travel without the clutter.",
         "Description":  "Context-sensitive travel for city and residential Aethernet, housing wards, Cosmic Exploration and same-DC World Visit.",
-        "Changelog":  "DEV9 TEST7 v0.3.11: Validated map clicks now start free Aethernet routing automatically without confirmation. Cross-city paid teleport automation is available through an explicit persistent opt-in. Deferred framework dispatch preserves live gil quote verification, native callback safeguards, movement cancellation and existing hybrid navigation. Debug confirmation remains optional. Stable v0.2.0 unchanged.",
+        "Changelog":  "DEV9 TEST8 v0.3.12: Automatic paid map routing is now enabled by default for new installations. Existing saved preferences are respected and users can disable paid automation in Settings. Free routing, live gil verification, hybrid movement, cancellation and native safeguards unchanged. Stable v0.2.0 unchanged.",
         "Tags":  [
                      "aethernet",
                      "aetheryte",
