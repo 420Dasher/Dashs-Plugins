@@ -90,7 +90,7 @@
         "InternalName":  "AethernetAssist",
         "Name":  "AethernetAssist",
         "AssemblyVersion":  "0.2.0.0",
-        "TestingAssemblyVersion":  "0.3.0.0",
+        "TestingAssemblyVersion":  "0.3.1.0",
         "DalamudApiLevel":  15,
         "TestingDalamudApiLevel":  15,
         "ApplicableVersion":  "any",
@@ -103,7 +103,7 @@
         "IsTestingExclusive":  false,
         "Punchline":  "Aethernet travel without the clutter.",
         "Description":  "Context-sensitive travel for city and residential Aethernet, housing wards, Cosmic Exploration and same-DC World Visit.",
-        "Changelog":  "DEV9 TEST1 FIX1 v0.3.0: Confirmed map-click routes, live gil quotes, one native paid teleport request, arrival validation, and city Aethernet handoff. Temporary map research UI removed. Stable v0.2.0 unchanged.",
+        "Changelog":  "DEV9 TEST1 FIX2 v0.3.1: vnavmesh pathfinding and guarded walking from paid teleport arrival to main Aetheryte interaction range, followed by native Aethernet travel. Manual movement and failed navigation cancel routing. Stable v0.2.0 unchanged.",
         "Tags":  [
                      "aethernet",
                      "aetheryte",
