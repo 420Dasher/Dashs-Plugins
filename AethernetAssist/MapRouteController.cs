@@ -57,6 +57,61 @@ public sealed unsafe partial class Plugin
                !IsBusy();
     }
 
+    // DEV9 TEST3
+    //
+    // A validated map destination must not initiate any
+    // route if the player is already beside THAT crystal.
+    //
+    // Match the actual game object's BaseId and territory,
+    // not another shard's name or shared network group.
+    private bool MapRouteAlreadyNearDestination(
+        uint destinationId,
+        uint destinationTerritory)
+    {
+        var player = Objects.LocalPlayer;
+
+        if (player == null ||
+            IsBusy() ||
+            Client.TerritoryType != destinationTerritory)
+            return false;
+
+        // Only known, visible Aethernet destinations qualify.
+        // The map may contain Aetherytes not supported by
+        // the local city Aethernet catalogue.
+        bool knownDestination = networks.Values.Any(group =>
+            group.Any(shard =>
+                shard.Id == destinationId &&
+                shard.Territory == destinationTerritory &&
+                !shard.Invisible
+            )
+        );
+
+        if (!knownDestination)
+            return false;
+
+        float range = Math.Clamp(
+            config.OpenRange,
+            8.0f,
+            11.1f
+        );
+
+        foreach (var obj in Objects)
+        {
+            if (obj == null ||
+                !obj.IsTargetable ||
+                obj.ObjectKind != ObjectKind.Aetheryte ||
+                obj.BaseId != destinationId)
+                continue;
+
+            if (Vector3.Distance(
+                player.Position,
+                obj.Position
+            ) <= range)
+                return true;
+        }
+
+        return false;
+    }
     private bool MapRouteNearSource(Shard target)
     {
         var player = Objects.LocalPlayer;
@@ -251,6 +306,19 @@ public sealed unsafe partial class Plugin
         var main = members.FirstOrDefault(x => x.IsMain);
         if (main == null)
             return;
+
+        if (MapRouteAlreadyNearDestination(
+            target.Id, target.Territory))
+        {
+            ClearMapRouteSelection();
+
+            Log.Information(
+                "DEV9 TEST3: No-op route; player already near " +
+                target.Name + " (ID " + target.Id + ")."
+            );
+
+            return;
+        }
 
         mapRouteTarget = target;
         mapRouteMain = main;

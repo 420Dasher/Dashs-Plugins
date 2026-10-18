@@ -527,6 +527,24 @@ public sealed unsafe partial class Plugin
 
         var destination = matches[0];
 
+        // A click on the crystal the player is already
+        // standing beside requires no route, popup or
+        // native Aethernet interaction.
+        if (MapRouteAlreadyNearDestination(
+            destination.RowId,
+            hover.Territory))
+        {
+            mapClickPreview = "No destination selected.";
+
+            AppendMapClickRecord(
+                "CLICK IGNORED: Already within interaction range " +
+                $"of destination ID {destination.RowId}. " +
+                "No route created."
+            );
+
+            return;
+        }
+
         string? catalogName = null;
 
         if (networks.TryGetValue(
