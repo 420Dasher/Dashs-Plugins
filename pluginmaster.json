@@ -90,7 +90,7 @@
         "InternalName":  "AethernetAssist",
         "Name":  "AethernetAssist",
         "AssemblyVersion":  "0.2.0.0",
-        "TestingAssemblyVersion":  "0.3.9.0",
+        "TestingAssemblyVersion":  "0.3.10.0",
         "DalamudApiLevel":  15,
         "TestingDalamudApiLevel":  15,
         "ApplicableVersion":  "any",
@@ -103,7 +103,7 @@
         "IsTestingExclusive":  false,
         "Punchline":  "Aethernet travel without the clutter.",
         "Description":  "Context-sensitive travel for city and residential Aethernet, housing wards, Cosmic Exploration and same-DC World Visit.",
-        "Changelog":  "DEV9 TEST5 FIX1 v0.3.9: Allows a small nearly-level navmesh offset at the final direct-approach waypoint while retaining strict intermediate corridor checks, stalled-movement fallback, manual cancellation and native interaction safeguards. Stable v0.2.0 unchanged.",
+        "Changelog":  "DEV9 TEST5 FIX2 v0.3.10: Clips direct movement to the last accepted navmesh sample instead of driving toward an unsupported crystal-side waypoint. Allows a bounded interaction-range handoff after stopping, with stationary verification and existing navmesh fallback. Stable v0.2.0 unchanged.",
         "Tags":  [
                      "aethernet",
                      "aetheryte",
