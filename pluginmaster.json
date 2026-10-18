@@ -90,7 +90,7 @@
         "InternalName":  "AethernetAssist",
         "Name":  "AethernetAssist",
         "AssemblyVersion":  "0.2.0.0",
-        "TestingAssemblyVersion":  "0.3.3.0",
+        "TestingAssemblyVersion":  "0.3.4.0",
         "DalamudApiLevel":  15,
         "TestingDalamudApiLevel":  15,
         "ApplicableVersion":  "any",
@@ -103,7 +103,7 @@
         "IsTestingExclusive":  false,
         "Punchline":  "Aethernet travel without the clutter.",
         "Description":  "Context-sensitive travel for city and residential Aethernet, housing wards, Cosmic Exploration and same-DC World Visit.",
-        "Changelog":  "DEV9 TEST2 FIX1 v0.3.3: Walk to a safe ~9y crystal distance, stop owned vnavmesh movement and verify 800ms of stable position before native Aethernet interaction. Applies to local and paid-arrival handoffs. Stable v0.2.0 unchanged.",
+        "Changelog":  "DEV9 TEST2 FIX2 v0.3.4: Completes same-city map routes on foot when the selected walking crystal is already the destination. Prevents self-teleports and native destination state 3 failures. Retains 9y approach and stationary checks. Stable v0.2.0 unchanged.",
         "Tags":  [
                      "aethernet",
                      "aetheryte",
