@@ -169,7 +169,6 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         LoadResidentialNetworks();
         LoadCosmicLocalNetworks();
         LoadOverworldAetherytes();
-        InitializeMapResearch();
         InitializeMapClickResearch();
 
         Commands.AddHandler("/anet", new CommandInfo(OnCommand)
@@ -195,7 +194,6 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         // Temporary native addon capture removed.
         cosmicPhase = CosmicPhase.Idle;
         DisposeMapClickResearch();
-        DisposeMapResearch();
         Framework.Update -= Update;
 
         Pi.UiBuilder.Draw -= Draw;
@@ -441,15 +439,6 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
                 settingsWindowOpen = true;
                 break;
 
-            case "map":
-                settingsWindowOpen = true;
-                ArmMapResearch();
-                break;
-
-            case "clicktest":
-                settingsWindowOpen = true;
-                ArmMapClickResearch();
-                break;
 
             case "housing":
                 OpenWindowManually();
@@ -480,7 +469,13 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
                 break;
 
             case "cancel":
-                if (overworldPhase != OverworldPhase.Idle)
+                if (mapRoutePhase != MapRoutePhase.Idle)
+                    StopMapRoute(
+                        "Tracking stopped. An accepted teleport " +
+                        "cannot be reversed.");
+                else if (mapRouteTarget != null)
+                    ClearMapRouteSelection();
+                else if (overworldPhase != OverworldPhase.Idle)
                     StopOverworldTeleport(
                         "Stopped tracking. An accepted teleport cannot be cancelled here.",
                         false);
@@ -513,6 +508,12 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
     {
         try
         {
+            TickMapRoute();
+
+            if (mapRoutePhase == MapRoutePhase.WaitingForPaidArrival ||
+                mapRoutePhase == MapRoutePhase.WaitingForSource)
+                return;
+
             if (worldVisitPhase != WorldVisitPhase.Idle)
             {
                 TickWorldVisit();
@@ -1679,8 +1680,6 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
             Save();
         }
 
-        DrawMapResearchControls();
-        DrawMapClickResearchControls();
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -1899,8 +1898,9 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
             ? CaptureDalamudColors()
             : Array.Empty<uint>();
 
-        // Settings are fully independent of navigation.
+        // Settings, routes and navigation are separate.
         DrawSettings();
+        DrawMapRouteWindow();
 
         if (!windowOpen)
             return;

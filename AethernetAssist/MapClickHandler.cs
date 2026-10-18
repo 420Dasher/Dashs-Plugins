@@ -12,6 +12,7 @@ using Dalamud.Game.Agent.AgentArgTypes;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using Lumina.Excel.Sheets;
 using NativeMap = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentMap;
+using DalamudAgentId = Dalamud.Game.Agent.AgentId;
 
 namespace AethernetAssist;
 
@@ -40,8 +41,7 @@ public sealed unsafe partial class Plugin
     private const float MapClickCursorTolerance = 28f;
     private const int MapClickHoverMaximumAgeMs = 220;
 
-    private bool mapClickArmed;
-    private DateTime mapClickUntil;
+
     private bool mapClickButtonDown;
     private bool mapClickDragged;
     private Vector2 mapClickStart;
@@ -58,8 +58,14 @@ public sealed unsafe partial class Plugin
             OnAreaMapInputResearch
         );
 
+        AgentLifecycle.RegisterListener(
+            AgentEvent.PostReceiveEvent,
+            DalamudAgentId.Map,
+            OnMapRoutingHoverEvent
+        );
+
         Log.Information(
-            "DEV8 TEST4: independent map-click safety observer initialized."
+            "DEV9 TEST1: passive map-click observer initialized."
         );
     }
 
@@ -71,37 +77,31 @@ public sealed unsafe partial class Plugin
             OnAreaMapInputResearch
         );
 
-        mapClickArmed = false;
+        AgentLifecycle.UnregisterListener(OnMapRoutingHoverEvent);
+        mapRouteInputEnabled = false;
     }
 
-    private void ArmMapClickResearch()
+    private bool MapClickCaptureActive() =>
+        mapRouteInputEnabled &&
+        mapRoutePhase == MapRoutePhase.Idle;
+
+    private void OnMapRoutingHoverEvent(
+        AgentEvent stage,
+        AgentArgs args)
     {
-        mapClickRecords.Clear();
-        mapClickHovered = null;
-        mapClickPressedHover = null;
-        mapClickButtonDown = false;
-        mapClickDragged = false;
-        mapClickInputEvents = 0;
-        mapClickPreview = "No destination selected.";
-        mapClickUntil = DateTime.UtcNow.AddSeconds(45);
-        mapClickArmed = true;
-        mapClickStatus = "Listening for left-clicks for 45 seconds.";
+        if (!MapClickCaptureActive())
+            return;
+
+        try
+        {
+            ObserveMapClickHover(stage, args);
+        }
+        catch (Exception ex)
+        {
+            mapRouteInputEnabled = false;
+            Log.Warning("Map hover listener disabled: " + ex);
+        }
     }
-
-    private bool MapClickCaptureActive()
-    {
-        if (!mapClickArmed)
-            return false;
-
-        if (DateTime.UtcNow <= mapClickUntil)
-            return true;
-
-        mapClickArmed = false;
-        mapClickPressedHover = null;
-        mapClickStatus = "Capture finished after 45 seconds.";
-        return false;
-    }
-
     // The Map agent emits a context identifying the marker
     // currently under the cursor. Capture its typed identity
     // independently from TEST2's diagnostic event buffer.
@@ -364,6 +364,7 @@ public sealed unsafe partial class Plugin
                     // No route may survive an unsuccessful
                     // click, an unrelated icon, or a map drag.
                     mapClickPreview = "No destination selected.";
+                    ClearMapRouteSelection();
 
                     if (!clicked)
                     {
@@ -382,10 +383,10 @@ public sealed unsafe partial class Plugin
         }
         catch (Exception ex)
         {
-            mapClickArmed = false;
+            mapRouteInputEnabled = false;
 
             string error =
-                "DEV8 TEST4 error at " +
+                "DEV9 TEST1 error at " +
                 researchStage + ": " +
                 ex.GetType().FullName + ": " +
                 ex.Message;
@@ -578,6 +579,8 @@ public sealed unsafe partial class Plugin
             $"Tooltip='{hover.Tooltip}'\n" +
             route
         );
+
+        PrepareMapRoute(destination.RowId);
     }
 
     private void AppendMapClickRecord(string value)
@@ -591,85 +594,8 @@ public sealed unsafe partial class Plugin
 
         mapClickStatus =
             $"{mapClickRecords.Count} interaction records captured.";
+
+        Log.Information("DEV9 map click: " + value);
     }
 
-    private string BuildMapClickReport()
-    {
-        var builder = new StringBuilder();
-        builder.AppendLine(
-            "=== AETHERNETASSIST DEV8 TEST4 MAP SAFETY ==="
-        );
-        builder.AppendLine("Version: " + UiVersion);
-        builder.AppendLine("Mode: READ ONLY");
-        builder.AppendLine("Status: " + mapClickStatus);
-        builder.AppendLine(
-            "Left-button release events: " + mapClickInputEvents
-        );
-        builder.AppendLine("Preview: " + mapClickPreview);
-        builder.AppendLine(
-            "Safety: marker anchored at mouse-down; " +
-            "fresh hover, pointer position, marker identity, " +
-            "tooltip, territory, map ID and live slot verified " +
-            "at mouse-up."
-        );
-
-        foreach (var record in mapClickRecords)
-        {
-            builder.AppendLine("---");
-            builder.AppendLine(record);
-        }
-
-        return builder.ToString();
-    }
-
-    private void DrawMapClickResearchControls()
-    {
-        ImGui.Spacing();
-        ImGui.Separator();
-
-        if (!ImGui.CollapsingHeader(
-            "MAP LEFT-CLICK SAFETY - DEV8 TEST4"))
-            return;
-
-        MapClickCaptureActive();
-
-        ImGui.TextDisabled(
-            "Original implementation | read-only | no teleport"
-        );
-
-        ImGui.TextWrapped(
-            "Read-only safety test. Each click requires " +
-            "fresh matching marker information at mouse-down " +
-            "and mouse-up, stable cursor position and the " +
-            "same visible map layer. Invalid clicks clear " +
-            "the previous route preview."
-        );
-
-        if (mapClickArmed)
-        {
-            if (ImGui.Button("Stop left-click capture"))
-            {
-                mapClickArmed = false;
-                mapClickStatus = "Stopped manually.";
-            }
-        }
-        else if (ImGui.Button("Arm left-click capture (45s)"))
-        {
-            ArmMapClickResearch();
-        }
-
-        ImGui.TextWrapped(mapClickStatus);
-        ImGui.TextWrapped("Last preview: " + mapClickPreview);
-
-        if (ImGui.Button("Copy left-click diagnostics"))
-        {
-            ImGui.SetClipboardText(BuildMapClickReport());
-        }
-
-        if (mapClickRecords.Count > 0)
-        {
-            ImGui.Spacing();
-            ImGui.TextWrapped(mapClickRecords[^1]);
-        }
-    }
 }
