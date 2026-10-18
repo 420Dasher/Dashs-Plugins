@@ -90,7 +90,7 @@
         "InternalName":  "AethernetAssist",
         "Name":  "AethernetAssist",
         "AssemblyVersion":  "0.2.0.0",
-        "TestingAssemblyVersion":  "0.2.7.0",
+        "TestingAssemblyVersion":  "0.2.8.0",
         "DalamudApiLevel":  15,
         "TestingDalamudApiLevel":  15,
         "ApplicableVersion":  "any",
@@ -103,7 +103,7 @@
         "IsTestingExclusive":  false,
         "Punchline":  "Aethernet travel without the clutter.",
         "Description":  "Context-sensitive travel for city and residential Aethernet, housing wards, Cosmic Exploration and same-DC World Visit.",
-        "Changelog":  "DEV8 TEST2 FIX1 v0.2.7: Suppresses repeated per-frame map hover events while preserving exact marker and click diagnostics. Includes CS0136 compile correction. Stable remains v0.2.0.",
+        "Changelog":  "DEV8 TEST3 v0.2.8: Original read-only AreaMap left-click detection, drag rejection, typed Aetheryte marker resolution and route previews. No automatic map travel. Stable remains v0.2.0.",
         "Tags":  [
                      "aethernet",
                      "aetheryte",
