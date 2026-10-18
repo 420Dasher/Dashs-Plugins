@@ -509,6 +509,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
     {
         try
         {
+            TickMapClickRecovery();
             TickMapRoute();
 
             if (mapRoutePhase == MapRoutePhase.WaitingForPaidArrival ||

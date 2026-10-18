@@ -267,6 +267,8 @@ public sealed unsafe partial class Plugin
                     false
                 );
 
+            mapRouteOwnedPathEnd = movementGoal;
+            mapRouteLastOwnershipCheck = DateTime.UtcNow;
             mapRouteWalkOwnsPath = true;
             mapRouteWalkAttempted = true;
             mapRouteDirectActive = true;

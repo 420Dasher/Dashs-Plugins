@@ -38,6 +38,12 @@ public sealed unsafe partial class Plugin
     private DateTime mapRouteWalkLastProgress;
     private Vector3 mapRouteWalkLastPosition;
 
+    // vnavmesh has a shared waypoint follower. Track our
+    // submitted endpoint so cancelling AethernetAssist
+    // does not stop a path started by another controller.
+    private Vector3? mapRouteOwnedPathEnd;
+    private DateTime mapRouteLastOwnershipCheck;
+
     // Never interact on the same frame that movement stops.
     private bool mapRouteSettling;
     private DateTime mapRouteSettleStarted;
@@ -590,17 +596,73 @@ public sealed unsafe partial class Plugin
     // This prevents a delayed pathfinding result from
     // initiating movement after the route was cancelled.
 
+    private bool MapRoutePathWasReplaced()
+    {
+        if (!mapRouteWalkOwnsPath ||
+            !mapRouteOwnedPathEnd.HasValue)
+            return false;
+
+        var waypoints = Pi.GetIpcSubscriber<List<Vector3>>(
+            "vnavmesh.Path.ListWaypoints"
+        ).InvokeFunc();
+
+        return waypoints != null &&
+               waypoints.Count > 0 &&
+               Vector3.Distance(
+                   waypoints[waypoints.Count - 1],
+                   mapRouteOwnedPathEnd.Value
+               ) > 1.25f;
+    }
+
     private void StopMapRouteWalk()
     {
         bool owned = mapRouteWalkOwnsPath;
+        bool replaced = false;
+        bool empty = false;
+
+        if (owned)
+        {
+            try
+            {
+                replaced = MapRoutePathWasReplaced();
+
+                var waypoints =
+                    Pi.GetIpcSubscriber<List<Vector3>>(
+                        "vnavmesh.Path.ListWaypoints"
+                    ).InvokeFunc();
+
+                empty = waypoints == null ||
+                        waypoints.Count == 0;
+            }
+            catch (Exception ex)
+            {
+                // If the diagnostic IPC is unavailable,
+                // retain the existing best-effort stop.
+                Log.Warning(
+                    "Could not inspect owned path during stop: " +
+                    ex.Message
+                );
+            }
+        }
 
         mapRouteWalkOwnsPath = false;
+        mapRouteOwnedPathEnd = null;
         mapRouteWalkPathTask = null;
         mapRouteWalkAttempted = false;
         mapRouteDirectActive = false;
 
-        if (!owned)
+        if (!owned || empty)
             return;
+
+        if (replaced)
+        {
+            Log.Warning(
+                "AethernetAssist RC1: another controller " +
+                "replaced the vnavmesh path. " +
+                "Leaving external movement untouched."
+            );
+            return;
+        }
 
         try
         {
@@ -864,6 +926,9 @@ public sealed unsafe partial class Plugin
                         "vnavmesh.Path.MoveTo"
                     ).InvokeAction(points, false);
 
+                mapRouteOwnedPathEnd =
+                    points[points.Count - 1];
+                mapRouteLastOwnershipCheck = now;
                 mapRouteWalkOwnsPath = true;
                 mapRouteWalkLastProgress = now;
                 mapRouteWalkLastPosition = player.Position;
@@ -1038,7 +1103,16 @@ public sealed unsafe partial class Plugin
         if (mapRoutePhase == MapRoutePhase.WaitingForSource)
         {
             if (IsBusy() || Objects.LocalPlayer == null)
+            {
+                if (mapRouteWalkOwnsPath)
+                {
+                    StopMapRoute(
+                        "Game state changed during automatic walking."
+                    );
+                }
+
                 return;
+            }
 
             if (mapRouteWalkingLocal &&
                 HousingMovementKeysPressed())
@@ -1055,6 +1129,35 @@ public sealed unsafe partial class Plugin
             {
                 StopMapRoute("Unexpected destination territory.");
                 return;
+            }
+
+            // Verify at a modest interval rather than
+            // querying vnavmesh on every rendered frame.
+            if (mapRouteWalkOwnsPath &&
+                (DateTime.UtcNow - mapRouteLastOwnershipCheck)
+                    .TotalMilliseconds >= 300)
+            {
+                mapRouteLastOwnershipCheck = DateTime.UtcNow;
+
+                try
+                {
+                    if (MapRoutePathWasReplaced())
+                    {
+                        StopMapRoute(
+                            "Navigation path taken over by " +
+                            "another controller."
+                        );
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    StopMapRoute(
+                        "Navigation ownership check failed: " +
+                        ex.Message
+                    );
+                    return;
+                }
             }
 
             ScanNearby();

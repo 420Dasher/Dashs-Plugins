@@ -50,6 +50,47 @@ public sealed unsafe partial class Plugin
     private string mapClickPreview = "No destination selected.";
     private int mapClickInputEvents;
 
+    private DateTime mapClickRecoveryAt = DateTime.MinValue;
+
+    // An unexpected map-event error must never leave a
+    // partially validated click capable of starting travel.
+    // Pause briefly, clear all captured input and retry only
+    // on a fresh click after the cooldown.
+    private void SuspendMapClickInput()
+    {
+        mapRouteInputEnabled = false;
+        mapClickRecoveryAt = DateTime.UtcNow.AddSeconds(8);
+
+        mapClickButtonDown = false;
+        mapClickDragged = false;
+        mapClickPressedHover = null;
+        mapClickHovered = null;
+        mapClickPreview = "No destination selected.";
+
+        ClearMapRouteSelection();
+    }
+
+    private void TickMapClickRecovery()
+    {
+        if (mapRouteInputEnabled ||
+            mapClickRecoveryAt == DateTime.MinValue ||
+            DateTime.UtcNow < mapClickRecoveryAt)
+            return;
+
+        mapClickRecoveryAt = DateTime.MinValue;
+        mapClickButtonDown = false;
+        mapClickDragged = false;
+        mapClickPressedHover = null;
+        mapClickHovered = null;
+
+        mapRouteInputEnabled = true;
+
+        Log.Information(
+            "AethernetAssist RC1: map listener recovered; " +
+            "waiting for a fresh validated click."
+        );
+    }
+
     private void InitializeMapClickResearch()
     {
         AddonLifecycle.RegisterListener(
@@ -99,8 +140,10 @@ public sealed unsafe partial class Plugin
         }
         catch (Exception ex)
         {
-            mapRouteInputEnabled = false;
-            Log.Warning("Map hover listener disabled: " + ex);
+            SuspendMapClickInput();
+            Log.Warning(
+                "Map hover listener paused for recovery: " + ex
+            );
         }
     }
     // The Map agent emits a context identifying the marker
@@ -384,7 +427,7 @@ public sealed unsafe partial class Plugin
         }
         catch (Exception ex)
         {
-            mapRouteInputEnabled = false;
+            SuspendMapClickInput();
 
             string error =
                 "DEV9 TEST1 error at " +
@@ -397,7 +440,7 @@ public sealed unsafe partial class Plugin
             );
 
             mapClickStatus =
-                "Capture stopped: " +
+                "Capture paused temporarily: " +
                 ex.GetType().Name +
                 " during " + researchStage + ".";
 
