@@ -1,15 +1,19 @@
 {
-  "Author": "Dash + AI",
-  "Name": "APGambaHax",
-  "InternalName": "APGambaHax",
-  "AssemblyVersion": "0.1.13.0",
-  "DalamudApiLevel": 15,
-  "ApplicableVersion": "any",
-  "LoadRequiredState": 0,
-  "LoadSync": false,
-  "CanUnloadAsync": false,
-  "LoadPriority": 0,
-  "Punchline": "Make sense of the Gamba floor.",
-  "Description": "Modular companion tools for Aetherphone Gamba. Universal RoundTracker DEV1 adds live Blackjack hand tracking, shared casino observations, deduplication and read-only session statistics.",
-  "Tags": ["aetherphone", "gamba", "utility"]
+    "Author":  "Dash + AI",
+    "Name":  "APGambaHax",
+    "InternalName":  "APGambaHax",
+    "AssemblyVersion":  "0.1.14.0",
+    "DalamudApiLevel":  15,
+    "ApplicableVersion":  "any",
+    "LoadRequiredState":  0,
+    "LoadSync":  false,
+    "CanUnloadAsync":  false,
+    "LoadPriority":  0,
+    "Punchline":  "Make sense of the Gamba floor.",
+    "Description":  "Modular Aetherphone Gamba tools. Compatibility DEV1 improves post-update runtime binding, live Rewards checks and claim diagnostics while preserving existing automation.",
+    "Tags":  [
+                 "aetherphone",
+                 "gamba",
+                 "utility"
+             ]
 }

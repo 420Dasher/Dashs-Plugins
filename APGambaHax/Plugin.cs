@@ -450,6 +450,15 @@ public sealed class Plugin : IDalamudPlugin
     {
         Heading("REWARDS");
 
+        ImGui.TextDisabled(
+            "Bound runtime: " + bridge.RuntimeBinding);
+
+        ImGui.TextDisabled(
+            "Account: " +
+            (bridge.AccountKey.Length > 0
+                ? "Authenticated"
+                : "Not authenticated"));
+
         if (bridge.HasCasinoState)
         {
             if (bridge.DailySpinClaimed.HasValue)
@@ -555,6 +564,15 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.Separator();
             ImGui.TextDisabled(
                 "Last: " + rewardAutomation.LastRequest);
+
+            ImGui.TextDisabled(
+                "Aetherphone claim in flight: " +
+                (bridge.ClaimingBonus.Length > 0
+                    ? bridge.ClaimingBonus
+                    : "None"));
+
+            ImGui.TextDisabled(
+                "Live bonus types: " + bridge.Bonuses.Count);
             ImGui.TextDisabled(
                 $"Claim requests this session: " +
                 $"{rewardAutomation.Requests}");

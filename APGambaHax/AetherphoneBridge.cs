@@ -44,6 +44,9 @@ internal sealed class AetherphoneBridge
 
     public string Status { get; private set; } = "Waiting for Aetherphone";
     public string Version { get; private set; } = "--";
+
+    public string RuntimeBinding { get; private set; } =
+        "No Aetherphone runtime selected";
     public bool HasCasinoState { get; private set; }
 
     public string AccountKey { get; private set; } = "";
@@ -213,6 +216,36 @@ internal sealed class AetherphoneBridge
                 return false;
             }
 
+            // Verify the underlying Aetherphone store is still
+            // showing this bonus as eligible at click time.
+            // The bridge snapshot may be up to 1.5s old.
+            bool currentEligible = false;
+
+            if (Member(
+                Member(casinoStore, "State"),
+                "Bonuses") is IEnumerable currentBonuses)
+            {
+                foreach (var candidate in currentBonuses)
+                {
+                    if (string.Equals(
+                        Member(candidate, "Kind") as string,
+                        kind,
+                        StringComparison.Ordinal) &&
+                        Member(candidate, "Ready") is true &&
+                        Member(candidate, "Eligible") is true)
+                    {
+                        currentEligible = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!currentEligible)
+            {
+                message = "Live bonus state changed; waiting for refresh";
+                return false;
+            }
+
             var method = casinoStore.GetType().GetMethod(
                 "ClaimBonus",
                 InstanceFlags,
@@ -303,60 +336,79 @@ internal sealed class AetherphoneBridge
         ResetSnapshot();
         Status = "Modules disabled";
         Version = "--";
+        RuntimeBinding = "Modules disabled";
         nextReadUtc = DateTime.MinValue;
     }
 
-    private static object? FindCasinoApp(out string version)
+    private static object? FindCasinoApp(
+        out string version,
+        out string runtime)
     {
         version = "--";
-        object? bestApp = null;
-        var bestScore = -1;
+        runtime = "No Aetherphone runtime selected";
 
-        // DEV13's object path, with candidate selection to avoid
-        // preferring an old Aetherphone instance after a reload.
-        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+
+        // Dalamud updates may leave older assemblies and static
+        // Plugin.Instance references in the current process.
+        // The previous score favored stale Barkeep shifts.
+        // Look at the most recently loaded runtime first.
+        for (int index = assemblies.Length - 1; index >= 0; index--)
         {
-            var pluginType = assembly.GetType("Aetherphone.Plugin", false);
+            var assembly = assemblies[index];
+
+            var pluginType = assembly.GetType(
+                "Aetherphone.Plugin", false);
+
             if (pluginType is null)
                 continue;
 
-            var instance = pluginType.GetProperty("Instance", StaticFlags)
-                ?.GetValue(null);
-
-            var shell = Member(instance, "shell");
-            var apps = Member(shell, "apps") as IEnumerable;
-
-            if (apps is null)
-                continue;
-
-            foreach (var app in apps)
+            try
             {
-                if (app?.GetType().FullName !=
-                    "Aetherphone.Apps.Casino.CasinoApp")
+                var instance = pluginType.GetProperty(
+                    "Instance", StaticFlags)?.GetValue(null);
+
+                if (instance is null)
                     continue;
 
-                var store = Member(app, "casino");
-                var state = Member(store, "State");
-                var sitting = Member(state, "Sitting");
+                var shell = Member(instance, "shell");
 
-                var score = state is null ? 0 : 100;
-                if (sitting is not null)
-                    score += 100;
-
-                var cabinet = Member(app, "barkeep");
-                if (Member(cabinet, "shift") is not null)
-                    score += 300;
-
-                if (score <= bestScore)
+                if (Member(shell, "apps") is not IEnumerable apps)
                     continue;
 
-                bestScore = score;
-                bestApp = app;
-                version = assembly.GetName().Version?.ToString() ?? "unknown";
+                foreach (var app in apps)
+                {
+                    if (app?.GetType().FullName !=
+                        "Aetherphone.Apps.Casino.CasinoApp")
+                        continue;
+
+                    // A real CasinoApp exposes its own session and
+                    // casino store. Do not use old Barkeep state
+                    // as a reason to prefer an older instance.
+                    if (Member(app, "session") is null ||
+                        Member(app, "casino") is null)
+                        continue;
+
+                    version =
+                        assembly.GetName().Version?.ToString() ??
+                        "unknown";
+
+                    runtime =
+                        "Aetherphone " + version +
+                        " | loaded runtime " +
+                        (index + 1) + "/" + assemblies.Length;
+
+                    return app;
+                }
+            }
+            catch
+            {
+                // An old or unloading runtime must not prevent
+                // discovery of another Aetherphone instance.
             }
         }
 
-        return bestApp;
+        return null;
     }
 
     private static string BlackjackKey(
@@ -497,8 +549,12 @@ internal sealed class AetherphoneBridge
 
         try
         {
-            var app = FindCasinoApp(out var version);
+            var app = FindCasinoApp(
+                out var version,
+                out var runtime);
+
             Version = version;
+            RuntimeBinding = runtime;
 
             if (app is null)
             {
