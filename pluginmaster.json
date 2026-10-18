@@ -90,7 +90,7 @@
         "InternalName":  "AethernetAssist",
         "Name":  "AethernetAssist",
         "AssemblyVersion":  "0.2.0.0",
-        "TestingAssemblyVersion":  "0.3.6.0",
+        "TestingAssemblyVersion":  "0.3.7.0",
         "DalamudApiLevel":  15,
         "TestingDalamudApiLevel":  15,
         "ApplicableVersion":  "any",
@@ -103,7 +103,7 @@
         "IsTestingExclusive":  false,
         "Punchline":  "Aethernet travel without the clutter.",
         "Description":  "Context-sensitive travel for city and residential Aethernet, housing wards, Cosmic Exploration and same-DC World Visit.",
-        "Changelog":  "DEV9 TEST4 FIX1 v0.3.6: Recover empty vnavmesh paths by trying reachable walkable endpoints near the selected crystal, then another verified local-network shard if needed. Keeps stop-on-failure, manual cancellation, safe interaction and paid confirmation. Stable v0.2.0 unchanged.",
+        "Changelog":  "DEV9 TEST4 FIX2 v0.3.7: Expanded Solution Nine navmesh endpoint search, reachable and general mesh projection, validated alternative walking goals, and detailed mesh/path diagnostics. No automatic paid fallback. Stable v0.2.0 unchanged.",
         "Tags":  [
                      "aethernet",
                      "aetheryte",
