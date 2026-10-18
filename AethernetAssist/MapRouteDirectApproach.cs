@@ -90,17 +90,42 @@ public sealed unsafe partial class Plugin
                     probe.Y - projected.Y
                 );
 
-                if (horizontal > 1.5f ||
+                // Intermediate corridor samples must remain
+                // close to the navigation mesh.
+                //
+                // The last sample is our stopping point near
+                // the crystal, not the crystal's center.
+                // Allow a small, nearly-level navmesh seam
+                // there without weakening the whole route.
+                bool finalSample = i == samples;
+
+                float horizontalLimit =
+                    finalSample && vertical <= 0.5f
+                        ? 3.2f
+                        : 1.5f;
+
+                if (horizontal > horizontalLimit ||
                     vertical > 2.3f)
                 {
                     Log.Information(
-                        "DEV9 TEST5: direct corridor rejected " +
+                        "DEV9 TEST5 FIX1: direct corridor rejected " +
                         $"at {i}/{samples}: " +
                         $"horizontal={horizontal:0.00}, " +
+                        $"limit={horizontalLimit:0.00}, " +
                         $"vertical={vertical:0.00}."
                     );
 
                     return false;
+                }
+
+                if (finalSample && horizontal > 1.5f)
+                {
+                    Log.Information(
+                        "DEV9 TEST5 FIX1: ENDPOINT SEAM ACCEPTED; " +
+                        $"horizontal={horizontal:0.00}, " +
+                        $"vertical={vertical:0.00}; " +
+                        "intermediate samples passed."
+                    );
                 }
             }
 
