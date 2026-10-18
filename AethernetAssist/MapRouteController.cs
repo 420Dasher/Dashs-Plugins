@@ -94,10 +94,12 @@ public sealed unsafe partial class Plugin
         Shard target,
         Shard main,
         out bool direct,
+        out bool walkLocal,
         out uint gil,
         out string reason)
     {
         direct = false;
+        walkLocal = false;
         gil = 0;
         reason = "";
 
@@ -121,10 +123,27 @@ public sealed unsafe partial class Plugin
             return false;
         }
 
-        if (!target.IsMain && MapRouteNearSource(target))
+        if (!target.IsMain && !mapRouteExplicitPaid)
         {
-            direct = true;
-            return true;
+            if (MapRouteNearSource(target))
+            {
+                direct = true;
+                return true;
+            }
+
+            if (MapRouteInLocalNetwork(target))
+            {
+                if (MapRouteFindLocalSource(target) != null)
+                {
+                    walkLocal = true;
+                    return true;
+                }
+
+                reason =
+                    "No loaded local crystal found nearby. " +
+                    "Approach a shard or review the paid alternative.";
+                return false;
+            }
         }
 
         if (!IsUnlocked(main.Id))
@@ -186,19 +205,19 @@ public sealed unsafe partial class Plugin
         mapRouteTarget = target;
         mapRouteMain = main;
         mapRouteWindowOpen = true;
+        mapRouteExplicitPaid = false;
+        mapRouteWalkingLocal = false;
 
-        if (MapRouteTryQuote(
+        mapRouteQuoteReady = MapRouteTryQuote(
             target, main,
             out mapRoutePreviewDirect,
+            out mapRoutePreviewWalk,
             out mapRouteQuotedCost,
-            out string reason))
-        {
-            mapRouteStatus = "Ready for confirmation.";
-        }
-        else
-        {
-            mapRouteStatus = reason;
-        }
+            out string reason);
+
+        mapRouteStatus = mapRouteQuoteReady
+            ? "Ready for confirmation."
+            : reason;
     }
 
     private void ClearMapRouteSelection()
@@ -211,6 +230,11 @@ public sealed unsafe partial class Plugin
         mapRouteWindowOpen = false;
         mapRouteQuotedCost = 0;
         mapRoutePreviewDirect = false;
+        mapRoutePreviewWalk = false;
+        mapRouteExplicitPaid = false;
+        mapRouteQuoteReady = false;
+        mapRouteWalkingLocal = false;
+        mapRouteLocalSourceAddress = 0;
         mapRouteStatus = "";
     }
 
@@ -221,13 +245,15 @@ public sealed unsafe partial class Plugin
 
         if (target == null ||
             main == null ||
-            mapRoutePhase != MapRoutePhase.Idle)
+            mapRoutePhase != MapRoutePhase.Idle ||
+            !mapRouteQuoteReady)
             return;
 
         if (!MapRouteTryQuote(
             target,
             main,
             out bool direct,
+            out bool walkLocal,
             out uint currentCost,
             out string reason))
         {
@@ -236,9 +262,11 @@ public sealed unsafe partial class Plugin
         }
 
         if (direct != mapRoutePreviewDirect ||
+            walkLocal != mapRoutePreviewWalk ||
             currentCost != mapRouteQuotedCost)
         {
             mapRoutePreviewDirect = direct;
+            mapRoutePreviewWalk = walkLocal;
             mapRouteQuotedCost = currentCost;
             mapRouteStatus =
                 "Route or gil cost changed. Review and confirm again.";
@@ -262,6 +290,37 @@ public sealed unsafe partial class Plugin
             mapRouteWindowOpen = true;
             return;
         }
+
+        if (walkLocal)
+        {
+            var source = MapRouteFindLocalSource(target);
+
+            if (source == null)
+            {
+                mapRouteQuoteReady = false;
+                mapRouteStatus =
+                    "Local crystal disappeared. Select the icon again.";
+                return;
+            }
+
+            MapRouteRememberLocalSource(source);
+            mapRouteWalkingLocal = true;
+            mapRoutePhase = MapRoutePhase.WaitingForSource;
+            mapRouteStarted = DateTime.UtcNow;
+            mapRouteStatus =
+                "Approaching " + mapRouteLocalSourceName +
+                " for free Aethernet travel...";
+
+            Log.Information(
+                "DEV9 TEST2: free local route via " +
+                mapRouteLocalSourceName +
+                " to " + target.Name + "."
+            );
+
+            return;
+        }
+
+        mapRouteWalkingLocal = false;
 
         // Revalidate the native teleport entry immediately
         // before submitting an irrevocable paid request.
@@ -353,8 +412,12 @@ public sealed unsafe partial class Plugin
     {
         var player = Objects.LocalPlayer;
 
+        uint expectedTerritory = mapRouteWalkingLocal
+            ? mapRouteLocalSourceTerritory
+            : main.Territory;
+
         if (player == null ||
-            Client.TerritoryType != main.Territory)
+            Client.TerritoryType != expectedTerritory)
         {
             StopMapRoute(
                 "Arrival position is no longer valid."
@@ -372,15 +435,17 @@ public sealed unsafe partial class Plugin
 
         // Locate the actual loaded main Aetheryte rather
         // than using a hardcoded coordinate or map marker.
-        var crystal = Objects.FirstOrDefault(obj =>
-            obj != null &&
-            obj.IsTargetable &&
-            obj.ObjectKind == ObjectKind.Aetheryte &&
-            obj.BaseId == main.Id &&
-            Vector3.Distance(
-                player.Position, obj.Position
-            ) <= 75f
-        );
+        var crystal = mapRouteWalkingLocal
+            ? MapRouteGetRememberedSource()
+            : Objects.FirstOrDefault(obj =>
+                obj != null &&
+                obj.IsTargetable &&
+                obj.ObjectKind == ObjectKind.Aetheryte &&
+                obj.BaseId == main.Id &&
+                Vector3.Distance(
+                    player.Position, obj.Position
+                ) <= 75f
+            );
 
         if (crystal == null)
         {
@@ -483,7 +548,10 @@ public sealed unsafe partial class Plugin
         var player = Objects.LocalPlayer;
 
         if (player == null || IsBusy() ||
-            Client.TerritoryType != main.Territory)
+            Client.TerritoryType != (
+                mapRouteWalkingLocal
+                    ? mapRouteLocalSourceTerritory
+                    : main.Territory))
         {
             StopMapRoute(
                 "Arrival state changed during approach."
@@ -697,7 +765,18 @@ public sealed unsafe partial class Plugin
             if (IsBusy() || Objects.LocalPlayer == null)
                 return;
 
-            if (Client.TerritoryType != main.Territory)
+            if (mapRouteWalkingLocal &&
+                HousingMovementKeysPressed())
+            {
+                StopMapRoute("Cancelled by manual movement.");
+                return;
+            }
+
+            uint requiredTerritory = mapRouteWalkingLocal
+                ? mapRouteLocalSourceTerritory
+                : main.Territory;
+
+            if (Client.TerritoryType != requiredTerritory)
             {
                 StopMapRoute("Unexpected destination territory.");
                 return;
@@ -730,7 +809,7 @@ public sealed unsafe partial class Plugin
                 return;
             }
 
-            if (elapsed > 45)
+            if (elapsed > 60)
             {
                 StopMapRoute(
                     "Aetheryte approach timed out. " +
@@ -785,6 +864,9 @@ public sealed unsafe partial class Plugin
         mapRouteTarget = null;
         mapRouteMain = null;
         mapRouteWindowOpen = false;
+        mapRouteWalkingLocal = false;
+        mapRouteQuoteReady = false;
+        mapRouteLocalSourceAddress = 0;
         mapRouteStatus = "";
     }
 
@@ -796,6 +878,9 @@ public sealed unsafe partial class Plugin
         mapRoutePhase = MapRoutePhase.Idle;
         mapRouteTarget = null;
         mapRouteMain = null;
+        mapRouteWalkingLocal = false;
+        mapRouteQuoteReady = false;
+        mapRouteLocalSourceAddress = 0;
         mapRouteStatus = reason;
         mapRouteWindowOpen = true;
 
@@ -847,30 +932,59 @@ public sealed unsafe partial class Plugin
 
                 if (mapRoutePhase == MapRoutePhase.Idle)
                 {
-                    ImGui.TextDisabled(
-                        target.IsMain
+                    if (mapRouteQuoteReady)
+                    {
+                        string routeLabel = target.IsMain
                             ? "Direct to main Aetheryte"
                             : mapRoutePreviewDirect
                                 ? "Local Aethernet -> " + target.Name
-                                : main.Name + " -> " + target.Name
-                    );
+                                : mapRoutePreviewWalk
+                                    ? "Walk to local crystal -> " + target.Name
+                                    : main.Name + " -> " + target.Name;
 
-                    ImGui.TextWrapped(
-                        mapRoutePreviewDirect
-                            ? "No paid teleport required."
-                            : $"Paid teleport: {mapRouteQuotedCost:N0} gil"
-                    );
+                        ImGui.TextDisabled(routeLabel);
+
+                        ImGui.TextWrapped(
+                            mapRoutePreviewDirect || mapRoutePreviewWalk
+                                ? "No paid teleport required."
+                                : $"Paid teleport: {mapRouteQuotedCost:N0} gil"
+                        );
+                    }
 
                     if (mapRouteStatus != "Ready for confirmation.")
                         ImGui.TextWrapped(mapRouteStatus);
 
-                    if (ImGui.Button("Confirm route##map-confirm"))
-                        ConfirmMapRoute();
+                    if (mapRouteQuoteReady)
+                    {
+                        if (ImGui.Button("Confirm route##map-confirm"))
+                            ConfirmMapRoute();
 
-                    ImGui.SameLine();
+                        ImGui.SameLine();
+                    }
 
                     if (ImGui.Button("Cancel##map-cancel"))
                         ClearMapRouteSelection();
+
+                    // Paid travel is a deliberate secondary
+                    // action, never an automatic fallback.
+                    if (MapRouteInLocalNetwork(target))
+                    {
+                        ImGui.Spacing();
+
+                        if (mapRouteExplicitPaid)
+                        {
+                            if (ImGui.SmallButton(
+                                "Prefer free Aethernet##map-free"))
+                            {
+                                MapRouteSelectPaidAlternative(false);
+                            }
+                        }
+                        else if (ImGui.SmallButton(
+                            "Review paid alternative##map-paid"))
+                        {
+                            MapRouteSelectPaidAlternative(true);
+                        }
+                    }
                 }
                 else
                 {
