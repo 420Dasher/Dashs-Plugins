@@ -29,11 +29,16 @@ public sealed unsafe partial class Plugin
         uint IconId,
         int Slot,
         string Tooltip,
+        Vector2 HoverScreenPosition,
         DateTime ObservedAt
     );
 
     private readonly List<string> mapClickRecords = new();
     private MapHoverCandidate? mapClickHovered;
+    private MapHoverCandidate? mapClickPressedHover;
+
+    private const float MapClickCursorTolerance = 28f;
+    private const int MapClickHoverMaximumAgeMs = 220;
 
     private bool mapClickArmed;
     private DateTime mapClickUntil;
@@ -54,7 +59,7 @@ public sealed unsafe partial class Plugin
         );
 
         Log.Information(
-            "DEV8 TEST3 FIX1: safe read-only AreaMap observer initialized."
+            "DEV8 TEST4: independent map-click safety observer initialized."
         );
     }
 
@@ -73,6 +78,7 @@ public sealed unsafe partial class Plugin
     {
         mapClickRecords.Clear();
         mapClickHovered = null;
+        mapClickPressedHover = null;
         mapClickButtonDown = false;
         mapClickDragged = false;
         mapClickInputEvents = 0;
@@ -91,6 +97,7 @@ public sealed unsafe partial class Plugin
             return true;
 
         mapClickArmed = false;
+        mapClickPressedHover = null;
         mapClickStatus = "Capture finished after 45 seconds.";
         return false;
     }
@@ -169,10 +176,121 @@ public sealed unsafe partial class Plugin
             marker.MapMarker.IconId,
             (int)slot,
             tooltip,
+            ImGui.GetMousePos(),
             DateTime.UtcNow
         );
     }
 
+    // Check temporal and screen-space continuity instead of
+    // assuming a recently hovered marker was clicked.
+    // All checks are observational; native input is untouched.
+    private static bool IsFreshMapHover(MapHoverCandidate? candidate)
+    {
+        if (candidate == null)
+            return false;
+
+        double age =
+            (DateTime.UtcNow - candidate.ObservedAt).TotalMilliseconds;
+
+        return age >= 0 &&
+               age <= MapClickHoverMaximumAgeMs;
+    }
+
+    private static bool IsMapCursorConsistent(
+        Vector2 sampled,
+        Vector2 actual)
+    {
+        if (!float.IsFinite(sampled.X) ||
+            !float.IsFinite(sampled.Y) ||
+            !float.IsFinite(actual.X) ||
+            !float.IsFinite(actual.Y))
+            return false;
+
+        return Vector2.DistanceSquared(sampled, actual) <=
+               MapClickCursorTolerance * MapClickCursorTolerance;
+    }
+
+    private static bool SameMapMarker(
+        MapHoverCandidate first,
+        MapHoverCandidate second)
+    {
+        return first.Territory == second.Territory &&
+               first.MapId == second.MapId &&
+               first.DataType == second.DataType &&
+               first.DataKey == second.DataKey &&
+               first.SubKey == second.SubKey &&
+               first.IconId == second.IconId &&
+               first.Slot == second.Slot &&
+               string.Equals(
+                   first.Tooltip,
+                   second.Tooltip,
+                   StringComparison.Ordinal
+               );
+    }
+
+    // Verify the selected map still exposes exactly the
+    // marker recorded at the start of this interaction.
+    private static bool IsLiveMapMarker(
+        MapHoverCandidate candidate,
+        NativeMap* nativeMap)
+    {
+        if (nativeMap == null ||
+            nativeMap->SelectedTerritoryId != candidate.Territory ||
+            nativeMap->SelectedMapId != candidate.MapId)
+            return false;
+
+        int count = Math.Min(
+            (int)nativeMap->MapMarkerCount,
+            nativeMap->MapMarkers.Length
+        );
+
+        if (candidate.Slot < 0 ||
+            candidate.Slot >= count)
+            return false;
+
+        var marker = nativeMap->MapMarkers[candidate.Slot];
+
+        if (marker.DataType != candidate.DataType ||
+            marker.DataKey != candidate.DataKey ||
+            marker.MapMarkerSubKey != candidate.SubKey ||
+            marker.MapMarker.IconId != candidate.IconId)
+            return false;
+
+        // Tooltip is a second independent UI signal.
+        // A change to a trader, summoning bell, or other
+        // map object must not reuse a prior travel marker.
+        string currentTooltip =
+            Clean(nativeMap->TooltipString.ToString());
+
+        return string.Equals(
+            currentTooltip,
+            candidate.Tooltip,
+            StringComparison.Ordinal
+        );
+    }
+
+    private MapHoverCandidate? ReadPressedMapMarker(
+        Vector2 pressPosition)
+    {
+        var hovered = mapClickHovered;
+        var nativeMap = NativeMap.Instance();
+
+        if (!IsFreshMapHover(hovered) ||
+            hovered == null ||
+            nativeMap == null)
+            return null;
+
+        if (!IsMapCursorConsistent(
+            hovered.HoverScreenPosition,
+            pressPosition
+        ))
+            return null;
+
+        if (!IsLiveMapMarker(hovered, nativeMap))
+            return null;
+
+        return hovered;
+    }
     private void OnAreaMapInputResearch(
         AddonEvent stage,
         AddonArgs args)
@@ -202,6 +320,14 @@ public sealed unsafe partial class Plugin
                     mapClickDragged = false;
                     mapClickStart = point;
                     mapClickPressTime = DateTime.UtcNow;
+
+                    // Anchor the marker identity when the
+                    // left mouse button is actually pressed.
+                    // If input arrived without a fresh hover,
+                    // the subsequent release cannot select it.
+                    researchStage = "Anchoring mouse-down marker";
+                    mapClickPressedHover =
+                        ReadPressedMapMarker(point);
                     break;
 
                 case AddonEventType.MouseMove:
@@ -232,17 +358,25 @@ public sealed unsafe partial class Plugin
 
                     mapClickButtonDown = false;
 
+                    var pressedMarker = mapClickPressedHover;
+                    mapClickPressedHover = null;
+
+                    // No route may survive an unsuccessful
+                    // click, an unrelated icon, or a map drag.
+                    mapClickPreview = "No destination selected.";
+
                     if (!clicked)
                     {
                         AppendMapClickRecord(
                             "Left-button release ignored: " +
-                            "no matching press or map drag."
+                            "no matching press or map drag. " +
+                            "Previous preview cleared."
                         );
                         return;
                     }
 
-                    researchStage = "Resolving clicked destination";
-                    InspectMapClickCandidate(point);
+                    researchStage = "Validating click and destination";
+                    InspectMapClickCandidate(point, pressedMarker);
                     break;
             }
         }
@@ -251,7 +385,7 @@ public sealed unsafe partial class Plugin
             mapClickArmed = false;
 
             string error =
-                "DEV8 TEST3 FIX1 error at " +
+                "DEV8 TEST4 error at " +
                 researchStage + ": " +
                 ex.GetType().FullName + ": " +
                 ex.Message;
@@ -269,32 +403,74 @@ public sealed unsafe partial class Plugin
         }
     }
 
-    private void InspectMapClickCandidate(Vector2 mousePosition)
+    private void InspectMapClickCandidate(
+        Vector2 mousePosition,
+        MapHoverCandidate? pressedMarker)
     {
-        var hover = mapClickHovered;
+        var hover = pressedMarker;
+        var currentHover = mapClickHovered;
         var nativeMap = NativeMap.Instance();
 
-        if (hover == null || nativeMap == null)
+        if (hover == null)
         {
             AppendMapClickRecord(
-                "Left-click detected, but no Aetheryte marker " +
-                "was identified at the cursor."
+                "CLICK REJECTED: No fresh, position-matched " +
+                "Aetheryte marker was present at mouse-down."
             );
             return;
         }
 
-        if (DateTime.UtcNow - hover.ObservedAt >
-            TimeSpan.FromMilliseconds(350) ||
-            hover.MapId != nativeMap->SelectedMapId ||
-            hover.Territory != nativeMap->SelectedTerritoryId)
+        if (!IsFreshMapHover(currentHover) ||
+            currentHover == null)
         {
             AppendMapClickRecord(
-                "Left-click detected; cached marker context " +
-                "was stale or belonged to another map."
+                "CLICK REJECTED: No fresh marker context " +
+                "was present at mouse-up."
             );
             return;
         }
 
+        if (!SameMapMarker(hover, currentHover))
+        {
+            AppendMapClickRecord(
+                "CLICK REJECTED: Marker identity or tooltip " +
+                "changed between mouse-down and mouse-up. " +
+                $"Pressed={hover.DataType}/{hover.DataKey}/" +
+                $"{hover.MapId}; " +
+                $"Released={currentHover.DataType}/" +
+                $"{currentHover.DataKey}/{currentHover.MapId}."
+            );
+            return;
+        }
+
+        if (!IsMapCursorConsistent(
+            currentHover.HoverScreenPosition,
+            mousePosition
+        ))
+        {
+            AppendMapClickRecord(
+                "CLICK REJECTED: Pointer moved away from " +
+                "the sampled marker position. " +
+                $"Hover={currentHover.HoverScreenPosition}; " +
+                $"Release={mousePosition}."
+            );
+            return;
+        }
+
+        if (nativeMap == null ||
+            !IsLiveMapMarker(hover, nativeMap))
+        {
+            AppendMapClickRecord(
+                "CLICK REJECTED: Live map layer, territory, " +
+                "marker slot, or tooltip no longer matches " +
+                "the mouse-down candidate."
+            );
+            return;
+        }
+
+        // This is still an observational safety gate.
+        // A match proves continuity of the hovered marker,
+        // not permission to teleport.
         // Resolve the actual Aetheryte row rather than
         // incorrectly treating MapMarker.DataKey as the
         // destination ID for both kinds of marker.
@@ -421,7 +597,7 @@ public sealed unsafe partial class Plugin
     {
         var builder = new StringBuilder();
         builder.AppendLine(
-            "=== AETHERNETASSIST DEV8 TEST3 FIX1 MAP CLICKS ==="
+            "=== AETHERNETASSIST DEV8 TEST4 MAP SAFETY ==="
         );
         builder.AppendLine("Version: " + UiVersion);
         builder.AppendLine("Mode: READ ONLY");
@@ -430,6 +606,12 @@ public sealed unsafe partial class Plugin
             "Left-button release events: " + mapClickInputEvents
         );
         builder.AppendLine("Preview: " + mapClickPreview);
+        builder.AppendLine(
+            "Safety: marker anchored at mouse-down; " +
+            "fresh hover, pointer position, marker identity, " +
+            "tooltip, territory, map ID and live slot verified " +
+            "at mouse-up."
+        );
 
         foreach (var record in mapClickRecords)
         {
@@ -446,7 +628,7 @@ public sealed unsafe partial class Plugin
         ImGui.Separator();
 
         if (!ImGui.CollapsingHeader(
-            "MAP LEFT-CLICK RESEARCH - DEV8 TEST3 FIX1"))
+            "MAP LEFT-CLICK SAFETY - DEV8 TEST4"))
             return;
 
         MapClickCaptureActive();
@@ -456,9 +638,11 @@ public sealed unsafe partial class Plugin
         );
 
         ImGui.TextWrapped(
-            "Observes native AreaMap left-button presses and " +
-            "releases. Dragging is excluded. Matching destinations " +
-            "are resolved through the game's Aetheryte data."
+            "Read-only safety test. Each click requires " +
+            "fresh matching marker information at mouse-down " +
+            "and mouse-up, stable cursor position and the " +
+            "same visible map layer. Invalid clicks clear " +
+            "the previous route preview."
         );
 
         if (mapClickArmed)
