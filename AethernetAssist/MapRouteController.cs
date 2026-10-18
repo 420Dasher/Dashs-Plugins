@@ -394,6 +394,8 @@ public sealed unsafe partial class Plugin
             return;
         }
 
+        ResetMapRoutePathRecovery();
+
         if (direct)
         {
             // Even nearby crystals must pass the same
@@ -629,48 +631,23 @@ public sealed unsafe partial class Plugin
                 return false;
             }
 
-            // Query a walking path that stops near the
-            // crystal rather than walking into its center.
-            //
-            // 6 yalms is comfortably within AethernetAssist's
-            // supported 8.0-11.1y interaction range.
-            const float approachRange = 6f;
-
-            mapRouteWalkPathTask = Pi.GetIpcSubscriber<
-                Vector3,
-                Vector3,
-                bool,
-                float,
-                Task<List<Vector3>>>(
-                    "vnavmesh.Nav.PathfindWithTolerance"
-                ).InvokeFunc(
-                    player.Position,
-                    crystal.Position,
-                    false,
-                    approachRange
-                );
-
-            if (mapRouteWalkPathTask == null)
-            {
-                StopMapRoute(
-                    "vnavmesh did not return a pathfinding task."
-                );
-                return false;
-            }
+            BuildMapRoutePathGoals(crystal);
 
             mapRouteWalkAttempted = true;
-            mapRouteWalkStarted = DateTime.UtcNow;
             mapRouteWalkLastProgress = DateTime.UtcNow;
             mapRouteWalkLastPosition = player.Position;
 
-            mapRouteStatus =
-                "Calculating walking route to " + main.Name + "...";
+            if (!SubmitNextMapRoutePath(
+                player.Position, crystal))
+            {
+                RecoverMapRoutePath(
+                    main,
+                    "No path requests could be started."
+                );
 
-            Log.Information(
-                "DEV9 FIX2: calculating Aetheryte approach " +
-                $"for {main.Name}; current distance " +
-                $"{Vector3.Distance(player.Position, crystal.Position):0.0}y."
-            );
+                return mapRoutePhase ==
+                    MapRoutePhase.WaitingForSource;
+            }
 
             return true;
         }
@@ -737,8 +714,9 @@ public sealed unsafe partial class Plugin
 
             if (pending.IsFaulted || pending.IsCanceled)
             {
-                StopMapRoute(
-                    "vnavmesh could not calculate the approach."
+                RecoverMapRoutePath(
+                    main,
+                    "Pathfinding task failed or was cancelled."
                 );
                 return;
             }
@@ -751,18 +729,32 @@ public sealed unsafe partial class Plugin
             }
             catch (Exception ex)
             {
-                StopMapRoute(
-                    "Pathfinding failed: " + ex.Message
+                RecoverMapRoutePath(
+                    main,
+                    "Path result error: " + ex.Message
                 );
                 return;
             }
 
-            if (points == null ||
-                points.Count == 0 ||
-                points.Count > 256)
+            var selectedCrystal =
+                MapRouteGetActiveWalkCrystal(main);
+
+            bool validEndpoint =
+                selectedCrystal != null &&
+                points != null &&
+                points.Count > 0 &&
+                points.Count <= 256 &&
+                Vector3.Distance(
+                    points[points.Count - 1],
+                    selectedCrystal.Position
+                ) <= MapRouteSafeInteractionRange() + 0.35f;
+
+            if (!validEndpoint)
             {
-                StopMapRoute(
-                    "No usable walking path to the Aetheryte."
+                RecoverMapRoutePath(
+                    main,
+                    "Empty path, invalid length, or an " +
+                    "endpoint outside safe interaction range."
                 );
                 return;
             }
@@ -1151,6 +1143,7 @@ public sealed unsafe partial class Plugin
     private void CompleteMapRoute()
     {
         StopMapRouteWalk();
+        ResetMapRoutePathRecovery();
         mapRouteSettling = false;
 
         Log.Information(
@@ -1172,6 +1165,7 @@ public sealed unsafe partial class Plugin
     private void StopMapRoute(string reason)
     {
         StopMapRouteWalk();
+        ResetMapRoutePathRecovery();
         mapRouteSettling = false;
 
         var previous = mapRoutePhase;

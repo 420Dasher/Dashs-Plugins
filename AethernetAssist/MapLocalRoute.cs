@@ -33,7 +33,9 @@ public sealed unsafe partial class Plugin
     //
     // No guessing from nearby unrelated GameObjects.
     // vnavmesh will independently validate walkability.
-    private IGameObject? MapRouteFindLocalSource(Shard target)
+    private IGameObject? MapRouteFindLocalSource(
+        Shard target,
+        HashSet<nint>? excluded = null)
     {
         var player = Objects.LocalPlayer;
 
@@ -49,7 +51,9 @@ public sealed unsafe partial class Plugin
         {
             if (obj == null ||
                 !obj.IsTargetable ||
-                !IsShardObject(obj))
+                !IsShardObject(obj) ||
+                (excluded != null &&
+                 excluded.Contains(obj.Address)))
                 continue;
 
             string objectName = obj.Name.ToString();
