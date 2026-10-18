@@ -37,6 +37,12 @@ public sealed unsafe partial class Plugin
     private DateTime mapRouteWalkLastProgress;
     private Vector3 mapRouteWalkLastPosition;
 
+    // Never interact on the same frame that movement stops.
+    private bool mapRouteSettling;
+    private DateTime mapRouteSettleStarted;
+    private DateTime mapRouteStillSince = DateTime.MinValue;
+    private Vector3 mapRouteStillAnchor;
+
     private bool MapRouteCanStart()
     {
         return mapRoutePhase == MapRoutePhase.Idle &&
@@ -65,6 +71,38 @@ public sealed unsafe partial class Plugin
                ) <= config.OpenRange;
     }
 
+    // The 11.1y detection range is not the safe
+    // automated interaction distance.
+    //
+    // At the default proximity setting, we walk to 9y.
+    // Lower configured ranges get an additional 0.8y margin.
+    private float MapRouteSafeInteractionRange() =>
+        MathF.Min(9.0f, config.OpenRange - 0.8f);
+
+    private bool MapRouteInApproachRange(Shard target)
+    {
+        var player = Objects.LocalPlayer;
+
+        if (player == null ||
+            nearby == null ||
+            !MapRouteNearSource(target))
+            return false;
+
+        // A local walking route must finish beside the
+        // same real crystal selected before movement.
+        if (mapRouteWalkingLocal)
+        {
+            var remembered = MapRouteGetRememberedSource();
+
+            if (remembered == null ||
+                remembered.Address != nearby.Address)
+                return false;
+        }
+
+        return Vector3.Distance(
+            player.Position, nearby.Position
+        ) <= MapRouteSafeInteractionRange();
+    }
     private bool MapRouteAtMain(Shard main)
     {
         var player = Objects.LocalPlayer;
@@ -125,7 +163,7 @@ public sealed unsafe partial class Plugin
 
         if (!target.IsMain && !mapRouteExplicitPaid)
         {
-            if (MapRouteNearSource(target))
+            if (MapRouteInApproachRange(target))
             {
                 direct = true;
                 return true;
@@ -275,19 +313,26 @@ public sealed unsafe partial class Plugin
 
         if (direct)
         {
-            StartTravel(target);
+            // Even nearby crystals must pass the same
+            // stationary check before native interaction.
+            ScanNearby();
 
-            if (phase == TravelPhase.Idle)
+            if (nearby == null ||
+                !MapRouteInApproachRange(target))
             {
+                mapRouteQuoteReady = false;
                 mapRouteStatus =
-                    "Unable to start local Aethernet travel.";
+                    "Source moved. Select the map destination again.";
                 return;
             }
 
-            mapRoutePhase = MapRoutePhase.WaitingForShard;
+            MapRouteRememberLocalSource(nearby);
+            mapRouteWalkingLocal = true;
+            mapRouteSettling = false;
+            mapRoutePhase = MapRoutePhase.WaitingForSource;
             mapRouteStarted = DateTime.UtcNow;
-            mapRouteStatus = "Local Aethernet travel started.";
-            mapRouteWindowOpen = true;
+            mapRouteStatus =
+                "Preparing local Aethernet interaction...";
             return;
         }
 
@@ -305,6 +350,7 @@ public sealed unsafe partial class Plugin
 
             MapRouteRememberLocalSource(source);
             mapRouteWalkingLocal = true;
+            mapRouteSettling = false;
             mapRoutePhase = MapRoutePhase.WaitingForSource;
             mapRouteStarted = DateTime.UtcNow;
             mapRouteStatus =
@@ -743,6 +789,7 @@ public sealed unsafe partial class Plugin
                     return;
                 }
 
+                mapRouteSettling = false;
                 mapRoutePhase = MapRoutePhase.WaitingForSource;
                 mapRouteStarted = DateTime.UtcNow;
                 mapRouteStatus = "Finding arrival Aethernet crystal...";
@@ -784,14 +831,135 @@ public sealed unsafe partial class Plugin
 
             ScanNearby();
 
-            // Interaction range is authoritative. Do not
-            // open the native menu while still too far away.
-            if (MapRouteNearSource(target))
+            var player = Objects.LocalPlayer;
+            var now = DateTime.UtcNow;
+
+            if (player == null)
             {
+                StopMapRoute("Player unavailable during approach.");
+                return;
+            }
+
+            bool closeEnough = MapRouteInApproachRange(target);
+
+            if (closeEnough && !mapRouteSettling)
+            {
+                // Stop first. Do NOT dispatch native callbacks
+                // while the path or character is still moving.
                 StopMapRouteWalk();
 
-                // Starting the local Aethernet stage is
-                // handled by the existing native menu code.
+                mapRouteSettling = true;
+                mapRouteSettleStarted = now;
+                mapRouteStillSince = DateTime.MinValue;
+                mapRouteStillAnchor = player.Position;
+                mapRouteStatus = "Stopping near Aethernet crystal...";
+
+                Log.Information(
+                    "DEV9 FIX1: approach threshold reached; " +
+                    $"distance={Vector3.Distance(player.Position, nearby!.Position):0.00}y, " +
+                    $"safe limit={MapRouteSafeInteractionRange():0.00}y. " +
+                    "Stopping before native interaction."
+                );
+
+                return;
+            }
+
+            if (mapRouteSettling)
+            {
+                if (!closeEnough)
+                {
+                    StopMapRoute(
+                        "Moved away from the selected crystal " +
+                        "during interaction preparation."
+                    );
+                    return;
+                }
+
+                if (HousingMovementKeysPressed())
+                {
+                    StopMapRoute("Cancelled by manual movement.");
+                    return;
+                }
+
+                if ((now - mapRouteSettleStarted).TotalSeconds > 6)
+                {
+                    StopMapRoute(
+                        "Movement did not settle in time. " +
+                        "No native interaction attempted."
+                    );
+                    return;
+                }
+
+                bool pathRunning;
+
+                try
+                {
+                    pathRunning = Pi.GetIpcSubscriber<bool>(
+                        "vnavmesh.Path.IsRunning"
+                    ).InvokeFunc();
+                }
+                catch (Exception ex)
+                {
+                    StopMapRoute(
+                        "Could not verify stopped navigation: " +
+                        ex.Message
+                    );
+                    return;
+                }
+
+                if (pathRunning)
+                {
+                    mapRouteStillSince = DateTime.MinValue;
+                    mapRouteStillAnchor = player.Position;
+                    mapRouteStatus = "Waiting for vnavmesh to stop...";
+                    return;
+                }
+
+                // Measure cumulative movement, not just one
+                // frame's displacement. This prevents slowly
+                // gliding characters from appearing stationary.
+                if (Vector3.Distance(
+                    player.Position, mapRouteStillAnchor
+                ) > 0.06f)
+                {
+                    mapRouteStillAnchor = player.Position;
+                    mapRouteStillSince = now;
+                    mapRouteStatus = "Waiting for character to stop...";
+                    return;
+                }
+
+                if (mapRouteStillSince == DateTime.MinValue)
+                {
+                    mapRouteStillSince = now;
+                    return;
+                }
+
+                if ((now - mapRouteStillSince).TotalMilliseconds < 800)
+                {
+                    mapRouteStatus =
+                        "Confirming stable position before interaction...";
+                    return;
+                }
+
+                // Don't reuse a native menu from an earlier
+                // failed attempt or unrelated interaction.
+                if (GetAddon("TelepotTown") != null)
+                {
+                    StopMapRoute(
+                        "An Aethernet menu is already open. " +
+                        "Close it before starting another route."
+                    );
+                    return;
+                }
+
+                mapRouteSettling = false;
+
+                Log.Information(
+                    "DEV9 FIX1: character stationary for 800ms; " +
+                    $"distance={Vector3.Distance(player.Position, nearby!.Position):0.00}y. " +
+                    "Beginning native Aethernet interaction."
+                );
+
                 StartTravel(target);
 
                 if (phase != TravelPhase.Idle)
@@ -804,7 +972,7 @@ public sealed unsafe partial class Plugin
                 }
 
                 StopMapRoute(
-                    "Could not start Aethernet interaction."
+                    "Could not start native Aethernet interaction."
                 );
                 return;
             }
@@ -818,6 +986,9 @@ public sealed unsafe partial class Plugin
                 return;
             }
 
+            // Remain in walking state until safely within
+            // ~9y. Merely entering the 11.1y detection
+            // radius is no longer sufficient.
             TickMapRouteWalk(main);
             return;
         }
@@ -854,6 +1025,7 @@ public sealed unsafe partial class Plugin
     private void CompleteMapRoute()
     {
         StopMapRouteWalk();
+        mapRouteSettling = false;
 
         Log.Information(
             "DEV9 map route completed: " +
@@ -873,6 +1045,7 @@ public sealed unsafe partial class Plugin
     private void StopMapRoute(string reason)
     {
         StopMapRouteWalk();
+        mapRouteSettling = false;
 
         var previous = mapRoutePhase;
         mapRoutePhase = MapRoutePhase.Idle;
