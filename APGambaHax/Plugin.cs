@@ -307,13 +307,7 @@ public sealed class Plugin : IDalamudPlugin
                 ImGuiWindowFlags.NoCollapse))
             {
                 ImGui.TextDisabled(VersionText);
-
-                ImGui.SameLine(ImGui.GetWindowWidth() - 175f);
-
-                if (ImGui.SmallButton("Statistics"))
-                    statsOpen = true;
-
-                ImGui.SameLine();
+                ImGui.SameLine(ImGui.GetWindowWidth() - 91f);
 
                 if (ImGui.SmallButton("Settings"))
                     settingsOpen = true;
@@ -429,12 +423,23 @@ public sealed class Plugin : IDalamudPlugin
             $"Enabled modules: {cfg.ModulesEnabled.Count(x => x)} / 6");
 
         ImGui.Spacing();
+        ImGui.Separator();
 
-        if (ImGui.Button("Open statistics##OverviewStats"))
+        Heading("STATISTICS");
+
+        ImGui.TextDisabled(roundTracker.Status);
+
+        if (ImGui.Button(
+            "View detailed statistics##OverviewStats",
+            new Vector2(-1f, 0f)))
+        {
             statsOpen = true;
+        }
 
         ImGui.TextDisabled(
-            "Game statistics are available in a separate window.");
+            "Expandable session statistics for supported casino games.");
+
+        ImGui.Spacing();
 
         ImGui.TextDisabled(
             "Wager automation is disabled by default.");
@@ -740,9 +745,6 @@ public sealed class Plugin : IDalamudPlugin
 
         ImGui.TextWrapped(
             "Last wager: " + automation.LastResult);
-
-        if (ImGui.SmallButton("Open statistics##BarkeepStats"))
-            statsOpen = true;
 
         ImGui.Spacing();
 
@@ -1159,8 +1161,8 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.TextDisabled(
             "Live hand tracking: " + roundTracker.Status);
 
-        if (ImGui.Button("Open Blackjack statistics"))
-            statsOpen = true;
+        ImGui.TextDisabled(
+            "Detailed session statistics: Overview > Statistics.");
 
         ImGui.Spacing();
         ImGui.Separator();

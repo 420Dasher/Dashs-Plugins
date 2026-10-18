@@ -2,7 +2,7 @@
     "Author":  "Dash + AI",
     "Name":  "APGambaHax",
     "InternalName":  "APGambaHax",
-    "AssemblyVersion":  "0.1.16.0",
+    "AssemblyVersion":  "0.1.17.0",
     "DalamudApiLevel":  15,
     "ApplicableVersion":  "any",
     "LoadRequiredState":  0,
@@ -10,7 +10,7 @@
     "CanUnloadAsync":  false,
     "LoadPriority":  0,
     "Punchline":  "Make sense of the Gamba floor.",
-    "Description":  "Modular Aetherphone Gamba tools. RoundTracker DEV2 adds a separate expandable statistics window, live multi-game observations, simpler Barkeep controls and read-only mission guidance.",
+    "Description":  "Modular Aetherphone Gamba tools. Statistics live in a separate expandable window accessible from Overview; game helpers stay focused on their controls.",
     "Tags":  [
                  "aetherphone",
                  "gamba",
