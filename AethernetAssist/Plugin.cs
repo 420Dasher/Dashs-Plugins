@@ -189,6 +189,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        StopMapRouteWalk();
         StopHousingGateWalk();
         StopCosmicPath();
         // Temporary native addon capture removed.
@@ -570,7 +571,12 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         catch (Exception ex)
         {
             Log.Error($"AethernetAssist: {ex}");
-            if (overworldPhase != OverworldPhase.Idle)
+
+            if (mapRoutePhase != MapRoutePhase.Idle)
+                StopMapRoute(
+                    "Map route stopped after an internal error."
+                );
+            else if (overworldPhase != OverworldPhase.Idle)
                 StopOverworldTeleport(
                     "Stopped tracking after an internal error.",
                     false);
