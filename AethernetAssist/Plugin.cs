@@ -1646,6 +1646,20 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
             config.AutoWalkHousingGates = autoWalk;
             Save();
         }
+        bool autoPaidMap = config.AutoPaidMapRouting;
+
+        if (ImGui.Checkbox(
+            "Automatic paid map teleports",
+            ref autoPaidMap))
+        {
+            config.AutoPaidMapRouting = autoPaidMap;
+            Save();
+        }
+
+        ImGui.TextDisabled(
+            "Uses the live gil price. Disabled by default."
+        );
+
         bool showUnlearned = config.ShowUnlearned;
 
         if (ImGui.Checkbox(
@@ -1721,6 +1735,21 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         if (config.ShowDebug &&
             ImGui.CollapsingHeader("Diagnostics"))
         {
+            bool confirmMap = config.ConfirmMapRoutes;
+
+            if (ImGui.Checkbox(
+                "Confirm map routes (debug)",
+                ref confirmMap))
+            {
+                config.ConfirmMapRoutes = confirmMap;
+                Save();
+            }
+
+            ImGui.TextDisabled(
+                "Show the route preview before navigation."
+            );
+
+            ImGui.Separator();
             ImGui.TextColored(NavMuted, "NAVIGATION MEMORY");
 
             string savedTab = config.LastSelectedNavigationPage switch

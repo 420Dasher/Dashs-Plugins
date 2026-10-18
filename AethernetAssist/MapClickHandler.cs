@@ -83,6 +83,7 @@ public sealed unsafe partial class Plugin
 
     private bool MapClickCaptureActive() =>
         mapRouteInputEnabled &&
+        !mapRouteAutoPending &&
         mapRoutePhase == MapRoutePhase.Idle;
 
     private void OnMapRoutingHoverEvent(

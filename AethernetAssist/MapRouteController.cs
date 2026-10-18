@@ -24,6 +24,7 @@ public sealed unsafe partial class Plugin
     private Shard? mapRouteMain;
     private bool mapRouteInputEnabled = true;
     private bool mapRouteWindowOpen;
+    private bool mapRouteAutoPending;
     private bool mapRoutePreviewDirect;
     private bool mapRouteSawLoading;
     private uint mapRouteQuotedCost;
@@ -330,7 +331,8 @@ public sealed unsafe partial class Plugin
 
         mapRouteTarget = target;
         mapRouteMain = main;
-        mapRouteWindowOpen = true;
+        mapRouteWindowOpen = false;
+        mapRouteAutoPending = false;
         mapRouteExplicitPaid = false;
         mapRouteWalkingLocal = false;
         mapRouteWalkingToTarget = false;
@@ -342,9 +344,60 @@ public sealed unsafe partial class Plugin
             out mapRouteQuotedCost,
             out string reason);
 
-        mapRouteStatus = mapRouteQuoteReady
-            ? "Ready for confirmation."
-            : reason;
+        if (!mapRouteQuoteReady)
+        {
+            // Preserve useful error and fallback controls.
+            // No travel is submitted when quoting fails.
+            mapRouteStatus = reason;
+            mapRouteWindowOpen = true;
+
+            Log.Warning(
+                "DEV9 TEST7: Map route unavailable for " +
+                target.Name + ": " + reason
+            );
+
+            return;
+        }
+
+        bool paidRoute =
+            !mapRoutePreviewDirect && !mapRoutePreviewWalk;
+
+        // Debug mode preserves the old confirmation UI.
+        // Paid travel also requires either this window or
+        // the user's explicit persistent auto-pay opt-in.
+        bool needsConfirmation =
+            config.ConfirmMapRoutes ||
+            (paidRoute && !config.AutoPaidMapRouting);
+
+        if (needsConfirmation)
+        {
+            mapRouteStatus = "Ready for confirmation.";
+            mapRouteWindowOpen = true;
+
+            Log.Information(
+                "DEV9 TEST7: Previewing " + target.Name +
+                (paidRoute
+                    ? $"; paid quote={mapRouteQuotedCost:N0} gil."
+                    : "; free Aethernet route.")
+            );
+
+            return;
+        }
+
+        // Never request game movement or native teleport
+        // directly inside the AreaMap event callback.
+        // TickMapRoute dispatches on the next framework tick.
+        mapRouteAutoPending = true;
+        mapRouteStatus =
+            "Starting automatic route to " + target.Name + "...";
+
+        Log.Information(
+            "DEV9 TEST7: AUTO ROUTE QUEUED; " +
+            "destination=" + target.Name +
+            "; mode=" +
+            (paidRoute ? "paid" : "free") +
+            "; gil=" + mapRouteQuotedCost
+        );
     }
 
     private void ClearMapRouteSelection()
@@ -355,6 +408,7 @@ public sealed unsafe partial class Plugin
         mapRouteTarget = null;
         mapRouteMain = null;
         mapRouteWindowOpen = false;
+        mapRouteAutoPending = false;
         mapRouteQuotedCost = 0;
         mapRoutePreviewDirect = false;
         mapRoutePreviewWalk = false;
@@ -884,6 +938,52 @@ public sealed unsafe partial class Plugin
     }
     private void TickMapRoute()
     {
+        if (mapRouteAutoPending)
+        {
+            mapRouteAutoPending = false;
+
+            if (mapRoutePhase == MapRoutePhase.Idle &&
+                mapRouteQuoteReady &&
+                mapRouteTarget != null &&
+                mapRouteMain != null)
+            {
+                bool paidRoute =
+                    !mapRoutePreviewDirect &&
+                    !mapRoutePreviewWalk;
+
+                // Check consent again, even if Settings
+                // changed after the map click.
+                if (config.ConfirmMapRoutes ||
+                    (paidRoute && !config.AutoPaidMapRouting))
+                {
+                    mapRouteStatus = "Ready for confirmation.";
+                    mapRouteWindowOpen = true;
+                    return;
+                }
+
+                // ConfirmMapRoute independently revalidates:
+                // - current game state
+                // - target and route type
+                // - live gil cost
+                // - attunement
+                //
+                // A changed quote is NEVER auto-accepted.
+                ConfirmMapRoute();
+
+                if (mapRoutePhase == MapRoutePhase.Idle)
+                {
+                    // A failed revalidation must not be
+                    // silently retried or charged.
+                    mapRouteWindowOpen = true;
+
+                    Log.Warning(
+                        "DEV9 TEST7: Automatic route not started: " +
+                        mapRouteStatus
+                    );
+                }
+            }
+        }
+
         if (mapRoutePhase == MapRoutePhase.Idle)
             return;
 
@@ -1181,6 +1281,7 @@ public sealed unsafe partial class Plugin
 
     private void CompleteMapRoute()
     {
+        mapRouteAutoPending = false;
         StopMapRouteWalk();
         ResetMapRoutePathRecovery();
         mapRouteSettling = false;
@@ -1203,6 +1304,7 @@ public sealed unsafe partial class Plugin
 
     private void StopMapRoute(string reason)
     {
+        mapRouteAutoPending = false;
         StopMapRouteWalk();
         ResetMapRoutePathRecovery();
         mapRouteSettling = false;
@@ -1216,7 +1318,20 @@ public sealed unsafe partial class Plugin
         mapRouteQuoteReady = false;
         mapRouteLocalSourceAddress = 0;
         mapRouteStatus = reason;
-        mapRouteWindowOpen = true;
+
+        // Ordinary cancellation should not create a
+        // new popup in fully automatic routing mode.
+        // Unexpected failures remain visible.
+        mapRouteWindowOpen =
+            !reason.StartsWith(
+                "Cancelled by manual movement.",
+                StringComparison.OrdinalIgnoreCase) &&
+            !reason.StartsWith(
+                "Tracking stopped.",
+                StringComparison.OrdinalIgnoreCase) &&
+            !reason.StartsWith(
+                "Cancelled by user.",
+                StringComparison.OrdinalIgnoreCase);
 
         if (previous == MapRoutePhase.WaitingForShard &&
             phase != TravelPhase.Idle)
