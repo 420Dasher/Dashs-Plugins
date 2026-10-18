@@ -41,38 +41,122 @@ public sealed unsafe partial class Plugin
         mapRouteNextGoal = 0;
         mapRoutePathSourceAddress = crystal.Address;
 
-        // Preserve the original approach as the first
-        // candidate, since it already works elsewhere.
+        // Keep the existing, proven approach first.
         mapRoutePossibleGoals.Add(crystal.Position);
+
+        var player = Objects.LocalPlayer;
+
+        if (player == null)
+            return;
+
+        int reachableHits = 0;
+        int generalHits = 0;
+        int rejectedDistance = 0;
+        int rejectedHeight = 0;
+        int rejectedDuplicate = 0;
+        int nullResults = 0;
+
+        // Distinguish a missing starting surface from
+        // missing geometry around the destination.
+        try
+        {
+            Vector3? startPoint = Pi.GetIpcSubscriber<
+                Vector3, float, float, Vector3?>(
+                    "vnavmesh.Query.Mesh.NearestPoint"
+                ).InvokeFunc(player.Position, 3f, 6f);
+
+            Log.Information(
+                "DEV9 FIX2: start mesh=" +
+                (startPoint.HasValue
+                    ? startPoint.Value.ToString()
+                    : "NONE") +
+                "; player=" + player.Position +
+                "; crystal=" + crystal.Position +
+                "; physical distance=" +
+                Vector3.Distance(
+                    player.Position,
+                    crystal.Position).ToString("0.00")
+            );
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(
+                "DEV9 FIX2: start mesh query failed: " +
+                ex.Message
+            );
+        }
 
         Vector3[] offsets =
         {
             Vector3.Zero,
-            new(5.5f, 0f, 0f),
-            new(-5.5f, 0f, 0f),
-            new(0f, 0f, 5.5f),
-            new(0f, 0f, -5.5f),
-            new(4f, 0f, 4f),
-            new(-4f, 0f, 4f),
-            new(4f, 0f, -4f),
-            new(-4f, 0f, -4f)
+            new(3f, 0f, 0f),
+            new(-3f, 0f, 0f),
+            new(0f, 0f, 3f),
+            new(0f, 0f, -3f),
+            new(6f, 0f, 0f),
+            new(-6f, 0f, 0f),
+            new(0f, 0f, 6f),
+            new(0f, 0f, -6f),
+            new(4.5f, 0f, 4.5f),
+            new(-4.5f, 0f, 4.5f),
+            new(4.5f, 0f, -4.5f),
+            new(-4.5f, 0f, -4.5f)
         };
 
-        foreach (var offset in offsets)
-        {
-            try
-            {
-                Vector3 probe = crystal.Position + offset;
+        float maximumDistance =
+            MapRouteSafeInteractionRange() - 0.4f;
 
-                // vnavmesh exposes a read-only query that
-                // projects a point onto reachable mesh.
-                Vector3? result = Pi.GetIpcSubscriber<
-                    Vector3, float, float, Vector3?>(
-                        "vnavmesh.Query.Mesh.NearestPointReachable"
-                    ).InvokeFunc(probe, 2.2f, 4f);
+        // First query reachable polygons. If those yield
+        // insufficient candidates, also query ordinary
+        // navmesh geometry.
+        //
+        // Ordinary geometry is NOT automatically trusted:
+        // each returned position must still produce a
+        // valid walking path before any movement starts.
+        foreach (bool reachableOnly in new[] { true, false })
+        {
+            foreach (var offset in offsets)
+            {
+                if (mapRoutePossibleGoals.Count >= 16)
+                    break;
+
+                Vector3 probe = crystal.Position + offset;
+                Vector3? result;
+
+                try
+                {
+                    string channel = reachableOnly
+                        ? "vnavmesh.Query.Mesh.NearestPointReachable"
+                        : "vnavmesh.Query.Mesh.NearestPoint";
+
+                    result = Pi.GetIpcSubscriber<
+                        Vector3, float, float, Vector3?>(
+                            channel
+                        ).InvokeFunc(probe, 3f, 6f);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(
+                        "DEV9 FIX2: mesh query failed " +
+                        (reachableOnly ? "reachable" : "general") +
+                        ": " + ex.Message
+                    );
+
+                    // The remaining candidates, if any,
+                    // can still be independently validated.
+                    break;
+                }
 
                 if (!result.HasValue)
+                {
+                    nullResults++;
                     continue;
+                }
+
+                if (reachableOnly)
+                    reachableHits++;
+                else
+                    generalHits++;
 
                 Vector3 point = result.Value;
 
@@ -81,44 +165,42 @@ public sealed unsafe partial class Plugin
                     !float.IsFinite(point.Z))
                     continue;
 
-                // An alternate goal must really be within
-                // walking interaction distance of the same
-                // physical crystal, including height.
+                if (MathF.Abs(
+                    point.Y - crystal.Position.Y) > 4.5f)
+                {
+                    rejectedHeight++;
+                    continue;
+                }
+
                 if (Vector3.Distance(
                     point, crystal.Position
-                ) > MapRouteSafeInteractionRange() - 1f)
+                ) > maximumDistance)
+                {
+                    rejectedDistance++;
                     continue;
-
-                if (MathF.Abs(
-                    point.Y - crystal.Position.Y
-                ) > 3.5f)
-                    continue;
+                }
 
                 if (mapRoutePossibleGoals.Any(existing =>
                     Vector3.DistanceSquared(
                         existing, point) < 1.5f))
+                {
+                    rejectedDuplicate++;
                     continue;
+                }
 
                 mapRoutePossibleGoals.Add(point);
-            }
-            catch (Exception ex)
-            {
-                Log.Warning(
-                    "DEV9 TEST4: navmesh point projection " +
-                    "unavailable: " + ex.Message
-                );
-
-                // The original path and any already-found
-                // candidates are still valid to try.
-                break;
             }
         }
 
         Log.Information(
-            "DEV9 TEST4: " + crystal.Name +
-            " BaseID=" + crystal.BaseId +
-            "; reachable path goals=" +
-            mapRoutePossibleGoals.Count
+            "DEV9 FIX2: source BaseID=" + crystal.BaseId +
+            "; accepted goals=" + mapRoutePossibleGoals.Count +
+            "; reachable hits=" + reachableHits +
+            "; general hits=" + generalHits +
+            "; null results=" + nullResults +
+            "; rejected distance=" + rejectedDistance +
+            "; rejected height=" + rejectedHeight +
+            "; duplicates=" + rejectedDuplicate
         );
     }
 

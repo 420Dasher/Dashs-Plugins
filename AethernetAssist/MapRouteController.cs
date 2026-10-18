@@ -751,10 +751,27 @@ public sealed unsafe partial class Plugin
 
             if (!validEndpoint)
             {
+                string detail = points == null
+                    ? "NULL path"
+                    : "Waypoints=" + points.Count +
+                      (points.Count > 0 && selectedCrystal != null
+                        ? "; endpoint distance=" +
+                          Vector3.Distance(
+                              points[points.Count - 1],
+                              selectedCrystal.Position
+                          ).ToString("0.00")
+                        : "");
+
+                Log.Warning(
+                    "DEV9 FIX2: invalid path result: " +
+                    detail
+                );
+
                 RecoverMapRoutePath(
                     main,
-                    "Empty path, invalid length, or an " +
-                    "endpoint outside safe interaction range."
+                    "No valid path endpoint within " +
+                    MapRouteSafeInteractionRange().ToString("0.0") +
+                    "y of the selected crystal."
                 );
                 return;
             }
