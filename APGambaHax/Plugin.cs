@@ -865,28 +865,20 @@ public sealed class Plugin : IDalamudPlugin
 
                         ImGui.TextDisabled("Shift limit");
 
-                        int maximum = Math.Max(
-                            1, automation.MaximumNewBatchShifts);
-
-                        int count = automation.CanStartBatch
-                            ? Math.Min(cfg.WagerStopAfter, maximum)
-                            : cfg.WagerStopAfter;
+                        // Editing preferences never requires permission
+                        // to start a wager. The batch engine enforces
+                        // actual daily and session limits separately.
+                        int count = Math.Clamp(cfg.WagerStopAfter, 1, 9999);
 
                         ImGui.SetNextItemWidth(-1f);
-
-                        if (!automation.CanStartBatch)
-                            ImGui.BeginDisabled();
 
                         if (ImGui.InputInt(
                             "##BarkeepShiftLimit", ref count, 1, 10))
                         {
                             cfg.WagerStopAfter = Math.Clamp(
-                                count, 1, maximum);
+                                count, 1, 9999);
                             Save();
                         }
-
-                        if (!automation.CanStartBatch)
-                            ImGui.EndDisabled();
 
                         ImGui.TableNextColumn();
 
