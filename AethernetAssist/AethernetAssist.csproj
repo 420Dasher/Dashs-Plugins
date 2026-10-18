@@ -1,15 +1,15 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
-    <Version>0.3.13.0</Version>
-    <AssemblyVersion>0.3.13.0</AssemblyVersion>
-    <FileVersion>0.3.13.0</FileVersion>
+    <Version>3.0.0.0</Version>
+    <AssemblyVersion>3.0.0.0</AssemblyVersion>
+    <FileVersion>3.0.0.0</FileVersion>
     <AssemblyName>AethernetAssist</AssemblyName>
     <RootNamespace>AethernetAssist</RootNamespace>
     <Name>AethernetAssist</Name>
     <Author>Dash + AI</Author>
-    <Description>Contextual Aethernet travel assistance.</Description>
-    <Punchline>Aethernet travel without the clutter.</Punchline>
+    <Description>Click supported Aetherytes or Aethernet shards on the map to travel automatically. AethernetAssist handles teleports and walking to nearby crystals when needed. It also provides a compact interface for city and residential Aethernet, housing ward travel, Cosmic Exploration, and same-data-center World Visit.</Description>
+    <Punchline>Map-based Aetheryte and Aethernet navigation.</Punchline>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
