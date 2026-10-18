@@ -23,6 +23,7 @@ internal readonly record struct LiveMission(
     string GameKind,
     long Progress,
     long Target,
+    long Threshold,
     long Reward,
     bool Complete,
     bool Claimed);
@@ -932,6 +933,7 @@ internal sealed class AetherphoneBridge
                                         game,
                                         Number(Member(mission, "Progress")) ?? 0,
                                         Number(Member(mission, "Target")) ?? 0,
+                                        Number(Member(mission, "Threshold")) ?? 0,
                                         Number(Member(mission, "Reward")) ?? 0,
                                         Flag(Member(mission, "Complete")) ?? false,
                                         Flag(Member(mission, "Claimed")) ?? false));

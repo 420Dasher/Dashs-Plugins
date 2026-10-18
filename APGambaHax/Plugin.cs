@@ -187,6 +187,14 @@ public sealed class Plugin : IDalamudPlugin
         // Observe settled rounds without changing wager logic.
         roundTracker.Tick(bridge);
 
+        // Only save new server-observed mission variants.
+        // This never starts wagers or submits claims.
+        if (cfg.ModulesEnabled[2] &&
+            MissionCatalogue.Observe(cfg, bridge))
+        {
+            Save();
+        }
+
         // Reward claiming is independent of the Barkeep module.
         rewardAutomation.Tick(
             bridge,
@@ -931,49 +939,135 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
-    private static string MissionGuidance(LiveMission mission)
+    private static string MissionGuidance(LiveMission mission) =>
+        MissionCatalogue.Guidance(mission);
+
+    private void DrawMissionCatalogue()
     {
-        string metric = mission.Metric.Trim().ToLowerInvariant();
-        string game = mission.GameKind.Trim().ToLowerInvariant();
+        if (!ImGui.CollapsingHeader(
+            "Mission catalogue##MissionCatalogue"))
+            return;
 
-        bool unrestricted = game.Length == 0;
-        bool barkeepOnly =
-            game == "bartender" || game == "casino.bartender";
+        Heading("KNOWN OBJECTIVE FAMILIES");
 
-        return metric switch
+        ImGui.TextWrapped(
+            "Six mission metric families recognized by Aetherphone. " +
+            "This is not a complete verified server mission pool.");
+
+        foreach (var family in MissionCatalogue.Families)
         {
-            "wins" when unrestricted =>
-                "Barkeep: confirmed for unrestricted profitable wins.",
+            ImGui.TextUnformatted(
+                family.Metric + " - " + family.Description);
+        }
 
-            "wins" when barkeepOnly =>
-                "Barkeep: compatible; restricted variant unverified.",
+        ImGui.Spacing();
 
-            "rounds" when unrestricted =>
-                "Barkeep: likely compatible; server confirmation pending.",
+        if (ImGui.TreeNode(
+            "Client examples (14)##MissionExamples"))
+        {
+            try
+            {
+                ImGui.TextWrapped(
+                    "Examples verified in Aetherphone's client tests. " +
+                    "Availability on the server is not guaranteed.");
 
-            "rounds" when barkeepOnly =>
-                "Barkeep: likely compatible; server confirmation pending.",
+                foreach (var example in MissionCatalogue.ClientExamples)
+                {
+                    ImGui.TextWrapped(example.Description);
 
-            "games" =>
-                "Barkeep may count as one distinct game; verify on server.",
+                    ImGui.TextDisabled(
+                        MissionCatalogue.Shape(
+                            example.Metric,
+                            example.GameKind,
+                            example.Target,
+                            example.Threshold));
+                }
+            }
+            finally
+            {
+                ImGui.TreePop();
+            }
+        }
 
-            "hits" =>
-                "Multiplier objective: normal perfect Barkeep is 2x.",
+        var observed = MissionCatalogue.Observed(
+            cfg, bridge.AccountKey);
 
-            "maxbet" =>
-                "Manual only; maximum-bet automation is not planned.",
+        if (ImGui.TreeNode(
+            $"Observed server variants ({observed.Count})" +
+            "##ObservedMissionVariants"))
+        {
+            try
+            {
+                if (bridge.AccountKey.Length == 0)
+                {
+                    ImGui.TextDisabled(
+                        "Sign in to view this account's observations.");
+                }
+                else if (observed.Count == 0)
+                {
+                    ImGui.TextDisabled(
+                        "No mission variants recorded yet.");
+                }
 
-            "hosted" =>
-                "Hosted-table participation required; manual for now.",
+                foreach (var variant in observed)
+                {
+                    if (variant is null)
+                        continue;
 
-            _ =>
-                "Tracking only; no verified automatic completion route."
-        };
+                    ImGui.Separator();
+
+                    ImGui.TextWrapped(
+                        MissionCatalogue.Shape(
+                            variant.Metric,
+                            variant.GameKind,
+                            variant.Target,
+                            variant.Threshold));
+
+                    if (variant.MinimumReward ==
+                        variant.MaximumReward)
+                    {
+                        ImGui.TextDisabled(
+                            $"Reward observed: " +
+                            $"{variant.MinimumReward:N0} chips");
+                    }
+                    else
+                    {
+                        ImGui.TextDisabled(
+                            $"Rewards observed: " +
+                            $"{variant.MinimumReward:N0} - " +
+                            $"{variant.MaximumReward:N0} chips");
+                    }
+
+                    ImGui.TextDisabled(
+                        $"UTC dates observed: " +
+                        $"{variant.UtcDatesSeen:N0}");
+                }
+
+                ImGui.Spacing();
+
+                ImGui.TextWrapped(
+                    "Saved by account. Observed variants are not " +
+                    "guaranteed to recur on future days.");
+            }
+            finally
+            {
+                ImGui.TreePop();
+            }
+        }
+
+        ImGui.Spacing();
+
+        ImGui.TextDisabled(
+            "Catalogue observation never triggers gameplay.");
     }
 
     private void DrawMissions()
     {
         Heading("MISSIONS");
+
+        DrawMissionCatalogue();
+
+        ImGui.Spacing();
 
         if (!bridge.HasCasinoState ||
             bridge.AccountKey.Length == 0)

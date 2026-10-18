@@ -20,6 +20,11 @@ public sealed class Configuration : IPluginConfiguration
     // Mission claiming is separate from bonus claiming.
     public bool AutoClaimMissions { get; set; } = false;
 
+    // Account keys are SHA256 hashes created by the bridge.
+    // Only objective shapes and observed rewards are stored.
+    public Dictionary<string, List<ObservedMissionVariant>>
+        MissionCatalogueByAccount { get; set; } = new();
+
     // welcome, timed, reload, streak, levelup, broke, rebate
     public bool[] AutoBonusKinds { get; set; } =
         { true, true, true, true, true, true, true };
