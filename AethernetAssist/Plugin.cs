@@ -45,6 +45,9 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
     private static IDataManager Data { get; set; } = null!;
 
     [PluginService]
+    private static IAetheryteList Aetherytes { get; set; } = null!;
+
+    [PluginService]
     private static IGameGui Gui { get; set; } = null!;
 
     [PluginService]
@@ -58,6 +61,9 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
 
     [PluginService]
     private static IAddonLifecycle AddonLifecycle { get; set; } = null!;
+
+    [PluginService]
+    private static IAgentLifecycle AgentLifecycle { get; set; } = null!;
 
     [PluginService]
     private static IChatGui Chat { get; set; } = null!;
@@ -162,6 +168,8 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         LoadNetworks();
         LoadResidentialNetworks();
         LoadCosmicLocalNetworks();
+        LoadOverworldAetherytes();
+        InitializeMapClickResearch();
 
         Commands.AddHandler("/anet", new CommandInfo(OnCommand)
         {
@@ -181,10 +189,12 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        StopMapRouteWalk();
         StopHousingGateWalk();
         StopCosmicPath();
         // Temporary native addon capture removed.
         cosmicPhase = CosmicPhase.Idle;
+        DisposeMapClickResearch();
         Framework.Update -= Update;
 
         Pi.UiBuilder.Draw -= Draw;
@@ -430,6 +440,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
                 settingsWindowOpen = true;
                 break;
 
+
             case "housing":
                 OpenWindowManually();
 
@@ -459,7 +470,22 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
                 break;
 
             case "cancel":
-                if (worldVisitPhase != WorldVisitPhase.Idle)
+                if (mapRoutePhase != MapRoutePhase.Idle)
+                    StopMapRoute(
+                        "Tracking stopped. An accepted teleport " +
+                        "cannot be reversed.");
+                else if (mapRouteTarget != null)
+                    ClearMapRouteSelection();
+                else if (overworldPhase != OverworldPhase.Idle)
+                    StopOverworldTeleport(
+                        "Stopped tracking. An accepted teleport cannot be cancelled here.",
+                        false);
+                else if (overworldArmedDestination != 0)
+                {
+                    ClearOverworldSelection();
+                    overworldStatus = "Teleport selection cancelled.";
+                }
+                else if (worldVisitPhase != WorldVisitPhase.Idle)
                     TryStopWorldVisitFromUser();
                 else if (cosmicLocalPhase != CosmicLocalPhase.Idle)
                     StopCosmicLocal("Cancelled by user.");
@@ -483,6 +509,13 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
     {
         try
         {
+            TickMapClickRecovery();
+            TickMapRoute();
+
+            if (mapRoutePhase == MapRoutePhase.WaitingForPaidArrival ||
+                mapRoutePhase == MapRoutePhase.WaitingForSource)
+                return;
+
             if (worldVisitPhase != WorldVisitPhase.Idle)
             {
                 TickWorldVisit();
@@ -519,18 +552,36 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
                 return;
             }
 
+            if (overworldPhase != OverworldPhase.Idle)
+            {
+                TickOverworldTeleport();
+                return;
+            }
+
+
             if ((DateTime.UtcNow - lastScan).TotalMilliseconds < 200)
                 return;
 
             lastScan = DateTime.UtcNow;
             ScanNearby();
             ScanCosmicLocalNearby();
+            ScanOverworldNearby();
+            CaptureOverworldNativeMenu();
             UpdateProximityWindow();
         }
         catch (Exception ex)
         {
             Log.Error($"AethernetAssist: {ex}");
-            if (worldVisitPhase != WorldVisitPhase.Idle)
+
+            if (mapRoutePhase != MapRoutePhase.Idle)
+                StopMapRoute(
+                    "Map route stopped after an internal error."
+                );
+            else if (overworldPhase != OverworldPhase.Idle)
+                StopOverworldTeleport(
+                    "Stopped tracking after an internal error.",
+                    false);
+            else if (worldVisitPhase != WorldVisitPhase.Idle)
                 StopWorldVisit("Stopped after an internal error.");
             else if (cosmicLocalPhase != CosmicLocalPhase.Idle)
                 StopCosmicLocal("Stopped after an internal error.");
@@ -1292,36 +1343,34 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
 
     private void RestoreNavigationPage()
     {
-        bool housingAvailable = HousingPageAvailable();
+        // A user's saved preference takes priority over proximity.
+        // Housing detection must never force Housing when the
+        // user last explicitly selected Aethernet.
 
-        bool dcTravelAvailable =
-            WorldVisitPageAvailable() ||
-            worldVisitPhase != WorldVisitPhase.Idle;
-
-        bool aethernetAvailable =
-            nearby != null ||
-            TryFindResidentialShard(out _) ||
-            cosmicLocalNearby != null;
+        int available = AvailableNavigationTabsMask();
 
         NavigationPage remembered =
-            (NavigationPage)config.LastSelectedNavigationPage;
+            config.LastSelectedNavigationPage switch
+            {
+                0 => NavigationPage.Aethernet,
+                1 => NavigationPage.Housing,
+                2 => NavigationPage.DcTravel,
+                _ => NavigationPage.Aethernet
+            };
 
-        NavigationPage next =
-            housingAvailable && !aethernetAvailable
-                ? NavigationPage.Housing
-                : remembered switch
-                {
-                    NavigationPage.Housing when housingAvailable
-                        => NavigationPage.Housing,
+        // Aethernet is the universal fallback tab.
+        // Do not save this fallback: the original preference
+        // must survive zoning and temporary unavailability.
+        NavigationPage next = remembered switch
+        {
+            NavigationPage.Housing when (available & 2) != 0
+                => NavigationPage.Housing,
 
-                    NavigationPage.DcTravel when dcTravelAvailable
-                        => NavigationPage.DcTravel,
+            NavigationPage.DcTravel when (available & 4) != 0
+                => NavigationPage.DcTravel,
 
-                    NavigationPage.Aethernet
-                        => NavigationPage.Aethernet,
-
-                    _ => NavigationPage.Aethernet
-                };
+            _ => NavigationPage.Aethernet
+        };
 
         currentPage = next;
 
@@ -1367,8 +1416,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
     private void DrawPageTab(
         string label,
         NavigationPage target,
-        float width,
-        bool rememberSelection)
+        float width)
     {
         Vector2 pos = ImGui.GetCursorScreenPos();
         Vector2 size = new(width, 30f);
@@ -1407,14 +1455,15 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
                 1f);
         }
 
-        if (ImGui.IsItemClicked() && !selected)
+        if (ImGui.IsItemClicked())
         {
+            // Explicit clicks always establish user preference,
+            // including clicking the sole visible or selected tab.
+            // RememberNavigationPage only writes when changed.
             currentPage = target;
+            RememberNavigationPage(target);
 
-            if (rememberSelection)
-                RememberNavigationPage(target);
-
-            if (target == NavigationPage.Aethernet)
+            if (target == NavigationPage.Aethernet && !selected)
                 resetDestinationScroll = true;
         }
     }
@@ -1430,6 +1479,12 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         if (TryFindResidentialShard(out _))
         {
             DrawResidentialAethernetPage();
+            return;
+        }
+
+        if (nearby == null && overworldNearby != null)
+        {
+            DrawOverworldPage();
             return;
         }
 
@@ -1592,6 +1647,20 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
             config.AutoWalkHousingGates = autoWalk;
             Save();
         }
+        bool autoPaidMap = config.AutoPaidMapRouting;
+
+        if (ImGui.Checkbox(
+            "Automatic paid map teleports",
+            ref autoPaidMap))
+        {
+            config.AutoPaidMapRouting = autoPaidMap;
+            Save();
+        }
+
+        ImGui.TextDisabled(
+            "Enabled by default. Uses live gil prices."
+        );
+
         bool showUnlearned = config.ShowUnlearned;
 
         if (ImGui.Checkbox(
@@ -1632,6 +1701,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
             Save();
         }
 
+
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.TextColored(NavAccent, "APPEARANCE");
@@ -1666,6 +1736,39 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         if (config.ShowDebug &&
             ImGui.CollapsingHeader("Diagnostics"))
         {
+            bool confirmMap = config.ConfirmMapRoutes;
+
+            if (ImGui.Checkbox(
+                "Confirm map routes (debug)",
+                ref confirmMap))
+            {
+                config.ConfirmMapRoutes = confirmMap;
+                Save();
+            }
+
+            ImGui.TextDisabled(
+                "Show the route preview before navigation."
+            );
+
+            ImGui.Separator();
+            ImGui.TextColored(NavMuted, "NAVIGATION MEMORY");
+
+            string savedTab = config.LastSelectedNavigationPage switch
+            {
+                0 => "Aethernet",
+                1 => "Housing",
+                2 => "DC Travel",
+                _ => "Unset (Aethernet default)"
+            };
+
+            ImGui.TextUnformatted("Saved tab: " + savedTab);
+            ImGui.TextUnformatted("Displayed tab: " + currentPage);
+            ImGui.TextUnformatted(
+                "Available tabs mask: " + AvailableNavigationTabsMask());
+
+            ImGui.Spacing();
+            ImGui.Separator();
+
             ImGui.TextColored(NavMuted, "AETHERNET");
 
             ImGui.TextUnformatted(
@@ -1683,6 +1786,13 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
             ImGui.TextUnformatted(
                 "Travel phase: " + phase
             );
+
+            ImGui.TextUnformatted("Overworld source: " +
+                (overworldNearby?.Name.ToString() ?? "None"));
+            ImGui.TextUnformatted("Overworld phase: " + overworldPhase);
+            ImGui.TextWrapped(overworldStatus);
+            ImGui.TextWrapped("Native menu snapshots: " +
+                overworldMenuSnapshots.Count);
 
             ImGui.TextUnformatted(
                 "Callbacks: " + callbackAttempts + "/2"
@@ -1824,8 +1934,9 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
             ? CaptureDalamudColors()
             : Array.Empty<uint>();
 
-        // Settings are fully independent of navigation.
+        // Settings, routes and navigation are separate.
         DrawSettings();
+        DrawMapRouteWindow();
 
         if (!windowOpen)
             return;
@@ -1923,8 +2034,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
             DrawPageTab(
                 "Aethernet",
                 NavigationPage.Aethernet,
-                tabWidth,
-                visibleTabs > 1);
+                tabWidth);
 
             if (housingAvailable)
             {
@@ -1933,8 +2043,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
                 DrawPageTab(
                     "Housing",
                     NavigationPage.Housing,
-                    tabWidth,
-                    visibleTabs > 1);
+                    tabWidth);
             }
 
             if (dcTravelAvailable)
@@ -1944,8 +2053,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
                 DrawPageTab(
                     "DC Travel",
                     NavigationPage.DcTravel,
-                    tabWidth,
-                    visibleTabs > 1);
+                    tabWidth);
             }
 
             ImGui.Spacing();

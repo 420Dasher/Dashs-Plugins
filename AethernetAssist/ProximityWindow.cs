@@ -49,7 +49,7 @@ public sealed unsafe partial class Plugin
 
         bool nearAethernet =
             nearby != null || nearResidentialShard ||
-            nearCosmicShard;
+            nearCosmicShard || overworldNearby != null;
 
         bool nearHousingEntrance = TryFindWardEntrance(
             out _,
@@ -75,6 +75,8 @@ public sealed unsafe partial class Plugin
                 ? "Cosmic Aethernet shard"
             : nearResidentialShard
                 ? "Residential Aethernet shard"
+            : overworldNearby != null
+                ? "Overworld Aetheryte"
             : nearAethernet
                 ? "Aethernet shard / Aetheryte"
                 : nearCityAetheryte

@@ -954,6 +954,7 @@ public sealed unsafe partial class Plugin
 
             BuildCosmicLocalTravelReport() +
             BuildWorldVisitSelectionReport() +
-            BuildWorldVisitJourneyReport();
+            BuildWorldVisitJourneyReport() +
+            "\n\n" + BuildOverworldNativeMenuReport();
     }
 }
