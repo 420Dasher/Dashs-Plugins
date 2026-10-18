@@ -54,7 +54,7 @@ public sealed unsafe partial class Plugin
         );
 
         Log.Information(
-            "DEV8 TEST3: original read-only AreaMap observer initialized."
+            "DEV8 TEST3 FIX1: safe read-only AreaMap observer initialized."
         );
     }
 
@@ -182,6 +182,8 @@ public sealed unsafe partial class Plugin
             evt.AtkEventData == 0)
             return;
 
+        string researchStage = "Reading AreaMap input";
+
         try
         {
             var data = (AtkEventData*)evt.AtkEventData;
@@ -239,6 +241,7 @@ public sealed unsafe partial class Plugin
                         return;
                     }
 
+                    researchStage = "Resolving clicked destination";
                     InspectMapClickCandidate(point);
                     break;
             }
@@ -246,8 +249,23 @@ public sealed unsafe partial class Plugin
         catch (Exception ex)
         {
             mapClickArmed = false;
-            mapClickStatus = "Input diagnostic stopped after an error.";
-            Log.Warning("DEV8 map-click research: " + ex.Message);
+
+            string error =
+                "DEV8 TEST3 FIX1 error at " +
+                researchStage + ": " +
+                ex.GetType().FullName + ": " +
+                ex.Message;
+
+            AppendMapClickRecord(
+                error + "\n" + ex.StackTrace
+            );
+
+            mapClickStatus =
+                "Capture stopped: " +
+                ex.GetType().Name +
+                " during " + researchStage + ".";
+
+            Log.Warning(error + "\n" + ex);
         }
     }
 
@@ -284,7 +302,7 @@ public sealed unsafe partial class Plugin
 
         foreach (var row in Data.GetExcelSheet<Aetheryte>())
         {
-            if (row.Territory.Value.RowId != hover.Territory ||
+            if (row.Territory.RowId != hover.Territory ||
                 row.Invisible)
                 continue;
 
@@ -332,11 +350,22 @@ public sealed unsafe partial class Plugin
 
         var destination = matches[0];
 
-        string name = destination.AethernetName.Value.Name
-            .ToString().Trim();
+        string? catalogName = null;
 
-        if (string.IsNullOrWhiteSpace(name))
-            name = "Aetheryte " + destination.RowId;
+        if (networks.TryGetValue(
+            (uint)destination.AethernetGroup,
+            out var nameGroup))
+        {
+            catalogName = nameGroup.FirstOrDefault(
+                x => x.Id == destination.RowId
+            )?.Name;
+        }
+
+        string name = !string.IsNullOrWhiteSpace(catalogName)
+            ? catalogName
+            : !string.IsNullOrWhiteSpace(hover.Tooltip)
+                ? hover.Tooltip
+                : "Aetheryte " + destination.RowId;
 
         string route;
 
@@ -392,7 +421,7 @@ public sealed unsafe partial class Plugin
     {
         var builder = new StringBuilder();
         builder.AppendLine(
-            "=== AETHERNETASSIST DEV8 TEST3 MAP CLICKS ==="
+            "=== AETHERNETASSIST DEV8 TEST3 FIX1 MAP CLICKS ==="
         );
         builder.AppendLine("Version: " + UiVersion);
         builder.AppendLine("Mode: READ ONLY");
@@ -417,7 +446,7 @@ public sealed unsafe partial class Plugin
         ImGui.Separator();
 
         if (!ImGui.CollapsingHeader(
-            "MAP LEFT-CLICK RESEARCH - DEV8 TEST3"))
+            "MAP LEFT-CLICK RESEARCH - DEV8 TEST3 FIX1"))
             return;
 
         MapClickCaptureActive();
