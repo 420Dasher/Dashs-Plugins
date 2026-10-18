@@ -170,6 +170,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         LoadCosmicLocalNetworks();
         LoadOverworldAetherytes();
         InitializeMapResearch();
+        InitializeMapClickResearch();
 
         Commands.AddHandler("/anet", new CommandInfo(OnCommand)
         {
@@ -193,6 +194,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         StopCosmicPath();
         // Temporary native addon capture removed.
         cosmicPhase = CosmicPhase.Idle;
+        DisposeMapClickResearch();
         DisposeMapResearch();
         Framework.Update -= Update;
 
@@ -442,6 +444,11 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
             case "map":
                 settingsWindowOpen = true;
                 ArmMapResearch();
+                break;
+
+            case "clicktest":
+                settingsWindowOpen = true;
+                ArmMapClickResearch();
                 break;
 
             case "housing":
@@ -1673,6 +1680,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         }
 
         DrawMapResearchControls();
+        DrawMapClickResearchControls();
 
         ImGui.Spacing();
         ImGui.Separator();

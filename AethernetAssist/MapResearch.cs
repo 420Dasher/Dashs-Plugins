@@ -173,6 +173,8 @@ public sealed unsafe partial class Plugin
         AgentEvent type,
         AgentArgs args)
     {
+        ObserveMapClickHover(type, args);
+
         if (!mapResearchArmed)
             return;
 
