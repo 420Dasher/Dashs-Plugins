@@ -161,6 +161,18 @@ public sealed unsafe partial class Plugin
             return false;
         }
 
+        // Do not open the native Aethernet menu for a
+        // self-teleport. The current shard is already
+        // the requested destination.
+        if (!target.IsMain &&
+            MapRouteInApproachRange(target) &&
+            nearby != null &&
+            nearby.BaseId == target.Id)
+        {
+            reason = "Already at " + target.Name + ".";
+            return false;
+        }
+
         if (!target.IsMain && !mapRouteExplicitPaid)
         {
             if (MapRouteInApproachRange(target))
@@ -245,6 +257,7 @@ public sealed unsafe partial class Plugin
         mapRouteWindowOpen = true;
         mapRouteExplicitPaid = false;
         mapRouteWalkingLocal = false;
+        mapRouteWalkingToTarget = false;
 
         mapRouteQuoteReady = MapRouteTryQuote(
             target, main,
@@ -272,6 +285,7 @@ public sealed unsafe partial class Plugin
         mapRouteExplicitPaid = false;
         mapRouteQuoteReady = false;
         mapRouteWalkingLocal = false;
+        mapRouteWalkingToTarget = false;
         mapRouteLocalSourceAddress = 0;
         mapRouteStatus = "";
     }
@@ -295,6 +309,7 @@ public sealed unsafe partial class Plugin
             out uint currentCost,
             out string reason))
         {
+            mapRouteQuoteReady = false;
             mapRouteStatus = reason;
             return;
         }
@@ -350,23 +365,37 @@ public sealed unsafe partial class Plugin
 
             MapRouteRememberLocalSource(source);
             mapRouteWalkingLocal = true;
+
+            // This is the key distinction: if the crystal
+            // chosen for walking IS the requested destination,
+            // arrival on foot completes the route. There is
+            // no native teleport to submit.
+            mapRouteWalkingToTarget =
+                source.BaseId == target.Id;
+
             mapRouteSettling = false;
             mapRoutePhase = MapRoutePhase.WaitingForSource;
             mapRouteStarted = DateTime.UtcNow;
-            mapRouteStatus =
-                "Approaching " + mapRouteLocalSourceName +
-                " for free Aethernet travel...";
+
+            mapRouteStatus = mapRouteWalkingToTarget
+                ? "Walking directly to " + target.Name + "..."
+                : "Approaching " + mapRouteLocalSourceName +
+                  " for free Aethernet travel...";
 
             Log.Information(
-                "DEV9 TEST2: free local route via " +
-                mapRouteLocalSourceName +
-                " to " + target.Name + "."
+                "DEV9 TEST2 FIX2: local source BaseID=" +
+                source.BaseId +
+                ", destination AetheryteID=" +
+                target.Id +
+                ", walkingDirectlyToTarget=" +
+                mapRouteWalkingToTarget
             );
 
             return;
         }
 
         mapRouteWalkingLocal = false;
+        mapRouteWalkingToTarget = false;
 
         // Revalidate the native teleport entry immediately
         // before submitting an irrevocable paid request.
@@ -954,6 +983,35 @@ public sealed unsafe partial class Plugin
 
                 mapRouteSettling = false;
 
+                // The selected local crystal may itself be
+                // the requested destination. The game cannot
+                // teleport an Aethernet shard to itself.
+                //
+                // Only complete when the previously selected
+                // live object still matches the destination ID.
+                if (mapRouteWalkingToTarget)
+                {
+                    var arrivedSource = MapRouteGetRememberedSource();
+
+                    if (arrivedSource == null ||
+                        arrivedSource.BaseId != target.Id ||
+                        !MapRouteInApproachRange(target))
+                    {
+                        StopMapRoute(
+                            "Direct-walk destination identity changed."
+                        );
+                        return;
+                    }
+
+                    Log.Information(
+                        "DEV9 FIX2: reached " + target.Name +
+                        " on foot. No Aethernet callback needed."
+                    );
+
+                    CompleteMapRoute();
+                    return;
+                }
+
                 Log.Information(
                     "DEV9 FIX1: character stationary for 800ms; " +
                     $"distance={Vector3.Distance(player.Position, nearby!.Position):0.00}y. " +
@@ -1037,6 +1095,7 @@ public sealed unsafe partial class Plugin
         mapRouteMain = null;
         mapRouteWindowOpen = false;
         mapRouteWalkingLocal = false;
+        mapRouteWalkingToTarget = false;
         mapRouteQuoteReady = false;
         mapRouteLocalSourceAddress = 0;
         mapRouteStatus = "";
@@ -1052,6 +1111,7 @@ public sealed unsafe partial class Plugin
         mapRouteTarget = null;
         mapRouteMain = null;
         mapRouteWalkingLocal = false;
+        mapRouteWalkingToTarget = false;
         mapRouteQuoteReady = false;
         mapRouteLocalSourceAddress = 0;
         mapRouteStatus = reason;
@@ -1112,7 +1172,10 @@ public sealed unsafe partial class Plugin
                             : mapRoutePreviewDirect
                                 ? "Local Aethernet -> " + target.Name
                                 : mapRoutePreviewWalk
-                                    ? "Walk to local crystal -> " + target.Name
+                                    ? MapRouteFindLocalSource(target)?.BaseId ==
+                                      target.Id
+                                        ? "Walk directly to " + target.Name
+                                        : "Walk to local crystal -> " + target.Name
                                     : main.Name + " -> " + target.Name;
 
                         ImGui.TextDisabled(routeLabel);

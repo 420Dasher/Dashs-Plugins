@@ -4,7 +4,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Project = Join-Path $Root "AethernetAssist.csproj"
 
-Write-Host "== AethernetAssist v0.3.3 DEV9 TEST2 FIX1 SETTLED INTERACTION ==" -ForegroundColor Cyan
+Write-Host "== AethernetAssist v0.3.4 DEV9 TEST2 FIX2 DIRECT WALK ==" -ForegroundColor Cyan
 
 dotnet restore $Project
 if ($LASTEXITCODE -ne 0) {

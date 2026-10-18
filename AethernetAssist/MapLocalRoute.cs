@@ -10,6 +10,7 @@ public sealed unsafe partial class Plugin
     private bool mapRoutePreviewWalk;
     private bool mapRouteExplicitPaid;
     private bool mapRouteWalkingLocal;
+    private bool mapRouteWalkingToTarget;
     private bool mapRouteQuoteReady;
 
     private nint mapRouteLocalSourceAddress;
