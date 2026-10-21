@@ -149,11 +149,11 @@
     "Name":  "MarketRun",
     "InternalName":  "MarketRun",
     "AssemblyVersion":  "0.0.0.0",
-    "TestingAssemblyVersion": "0.1.0.6",
+    "TestingAssemblyVersion": "0.1.0.7",
     "Description":  "Import materials, manage shopping lists and track required quantities. Universalis price optimization and guided purchasing are planned.",
     "Punchline":  "Plan your next Market Board run.",
     "Changelog":  "Initial testing build.",
-    "TestingChangelog": "DEV2 FIX2: Asynchronous whole-stack optimization, work-based exact search and minimum-surplus tie-breaking.",
+    "TestingChangelog": "DEV2 FIX3: Practical and Absolute Cheapest shopping modes, list-wide route comparison, dynamic World Visit savings thresholds, current-world awareness and world shopping plan.",
     "ApplicableVersion":  "any",
     "Tags":  [
                  "market board",

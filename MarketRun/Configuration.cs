@@ -11,6 +11,9 @@ public sealed class Configuration : IPluginConfiguration
     // Estimated purchase tax, enabled by default.
     public bool IncludePurchaseTax { get; set; } = true;
 
+    // Practical shopping routes are the default.
+    public bool PracticalRoutes { get; set; } = true;
+
     public string ActiveListId { get; set; } = "";
 
     public List<ShoppingList> Lists { get; set; } = new();

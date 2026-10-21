@@ -21,6 +21,9 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService]
     private static IPluginLog Log { get; set; } = null!;
 
+    [PluginService]
+    private static IPlayerState Player { get; set; } = null!;
+
     private static readonly string[] DataCenters =
     {
         "Light", "Chaos",
@@ -33,13 +36,10 @@ public sealed class Plugin : IDalamudPlugin
     private readonly MaterialImporter importer;
     private readonly MarketPricing pricing = new();
 
-    private readonly Dictionary<
-        (uint Id, int Quality, int Remaining, bool Tax),
-        (MarketSnapshot Snapshot, Task<PurchasePlan> Job)> planCache = new();
-
-    // At most two expensive optimizations execute together.
-    private static readonly SemaphoreSlim OptimizationSlots =
-        new(2, 2);
+    private Task<RouteComparison>? routeJob;
+    private CancellationTokenSource? routeCancellation;
+    private string routeSignature = "";
+    private RouteComparison? activeRoutes;
 
     private bool mainOpen;
     private bool settingsOpen;
@@ -54,6 +54,13 @@ public sealed class Plugin : IDalamudPlugin
     private string importStatus = "";
 
     private List<ImportRow> preview = new();
+
+    private RouteChoice? ActiveRoute =>
+        activeRoutes == null
+            ? null
+            : cfg.PracticalRoutes
+                ? activeRoutes.Practical
+                : activeRoutes.Cheapest;
 
     private ShoppingList Active =>
         cfg.Lists.First(x => x.Id == cfg.ActiveListId);
@@ -95,7 +102,7 @@ public sealed class Plugin : IDalamudPlugin
         Pi.UiBuilder.OpenMainUi += Open;
         Pi.UiBuilder.OpenConfigUi += OpenSettings;
 
-        Log.Information("MarketRun v0.1.0 DEV2 FIX2 initialized.");
+        Log.Information("MarketRun v0.1.0 DEV2 FIX3 initialized.");
     }
 
     private void Save() => Pi.SavePluginConfig(cfg);
@@ -121,6 +128,8 @@ public sealed class Plugin : IDalamudPlugin
 
         Commands.RemoveHandler("/mrun");
         Commands.RemoveHandler("/shoplist");
+
+        routeCancellation?.Cancel();
         pricing.Dispose();
     }
 
@@ -169,6 +178,8 @@ public sealed class Plugin : IDalamudPlugin
                         .Where(x => x.Acquired < x.Quantity)
                         .Select(x => x.ItemId));
 
+                activeRoutes = UpdateRoutePlan();
+
                 if (ImGui.BeginTabBar("##MarketRunTabs"))
                 {
                     if (ImGui.BeginTabItem("Shopping List"))
@@ -201,7 +212,7 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.TextColored(Theme.Get(cfg, 4), "MARKET RUN");
 
         ImGui.SameLine();
-        ImGui.TextDisabled("v0.1.0 DEV2 FIX2");
+        ImGui.TextDisabled("v0.1.0 DEV2 FIX3");
 
         ImGui.SameLine(
             MathF.Max(280f, ImGui.GetWindowWidth() - 91f));
@@ -370,107 +381,127 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
-    private static async Task<PurchasePlan> OptimizeAsync(
-        MarketOffer[] offers,
-        int remaining,
-        int quality,
-        bool includeTax)
+    private RouteComparison? UpdateRoutePlan()
     {
-        await OptimizationSlots.WaitAsync()
-            .ConfigureAwait(false);
+        string world = Player.IsLoaded
+            ? Player.CurrentWorld.Value.Name.ToString()
+            : "";
 
-        try
+        var materials = new List<RouteMaterial>();
+
+        var signature =
+            new System.Text.StringBuilder();
+
+        signature.Append(cfg.ActiveListId)
+            .Append('|')
+            .Append(cfg.DataCenter)
+            .Append('|')
+            .Append(world)
+            .Append('|')
+            .Append(cfg.IncludePurchaseTax);
+
+        foreach (var item in Active.Items)
         {
-            return await Task.Run(() =>
-                PriceOptimizer.Calculate(
-                    offers,
-                    remaining,
-                    quality,
-                    includeTax))
-                .ConfigureAwait(false);
+            int remaining = Math.Max(
+                0, item.Quantity - item.Acquired);
+
+            if (remaining == 0)
+                continue;
+
+            var snapshot = pricing.Get(
+                cfg.DataCenter, item.ItemId);
+
+            if (snapshot == null)
+            {
+                return null;
+            }
+
+            string key =
+                $"{item.ItemId}-{item.Quality}";
+
+            signature.Append('|')
+                .Append(key)
+                .Append(':')
+                .Append(remaining)
+                .Append(':')
+                .Append(snapshot.ReceivedUtc.Ticks);
+
+            materials.Add(new RouteMaterial
+            {
+                Key = key,
+                Needed = remaining,
+                Quality = item.Quality,
+                Offers = snapshot.Offers.ToArray()
+            });
         }
-        finally
+
+        if (materials.Count == 0)
         {
-            OptimizationSlots.Release();
+            return null;
         }
+
+        string id = signature.ToString();
+
+        if (routeJob == null ||
+            !string.Equals(
+                routeSignature, id,
+                StringComparison.Ordinal))
+        {
+            routeCancellation?.Cancel();
+            routeCancellation = new CancellationTokenSource();
+
+            CancellationToken token =
+                routeCancellation.Token;
+
+            RouteMaterial[] captured =
+                materials.ToArray();
+
+            bool tax = cfg.IncludePurchaseTax;
+
+            routeSignature = id;
+
+            routeJob = Task.Run(() =>
+                ShoppingRoutePlanner.Calculate(
+                    captured,
+                    world,
+                    tax,
+                    token),
+                token);
+        }
+
+        return routeJob.IsCompletedSuccessfully
+            ? routeJob.Result
+            : null;
     }
 
     private PurchasePlan? GetPlan(ShoppingItem item)
     {
-        int remaining = Math.Max(
-            0, item.Quantity - item.Acquired);
+        var route = ActiveRoute;
 
-        if (remaining == 0)
+        if (route == null)
             return null;
 
-        var snapshot = pricing.Get(
-            cfg.DataCenter, item.ItemId);
+        string key =
+            $"{item.ItemId}-{item.Quality}";
 
-        if (snapshot == null)
-            return null;
-
-        var key = (
-            item.ItemId,
-            item.Quality,
-            remaining,
-            cfg.IncludePurchaseTax);
-
-        if (planCache.TryGetValue(key, out var existing) &&
-            ReferenceEquals(existing.Snapshot, snapshot))
-        {
-            if (existing.Job.IsCompletedSuccessfully)
-                return existing.Job.Result;
-
-            return null;
-        }
-
-        // Capture immutable inputs on the drawing thread.
-        // No configuration or ImGui access occurs in the task.
-        MarketOffer[] offers = snapshot.Offers.ToArray();
-
-        Task<PurchasePlan> job = OptimizeAsync(
-            offers,
-            remaining,
-            item.Quality,
-            cfg.IncludePurchaseTax);
-
-        planCache[key] = (snapshot, job);
-
-        if (planCache.Count > 512)
-        {
-            planCache.Clear();
-            planCache[key] = (snapshot, job);
-        }
-
-        return null;
+        return route.Plans.TryGetValue(key, out var plan)
+            ? plan
+            : null;
     }
 
     private string PlanPendingText(ShoppingItem item)
     {
-        var snapshot = pricing.Get(
-            cfg.DataCenter, item.ItemId);
+        if (item.Acquired >= item.Quantity)
+            return "Done";
 
-        if (snapshot == null)
+        if (pricing.Get(cfg.DataCenter, item.ItemId) == null)
             return "Price pending";
 
-        int remaining = Math.Max(
-            0, item.Quantity - item.Acquired);
+        if (routeJob != null &&
+            routeJob.IsFaulted)
+            return "Route calculation failed";
 
-        var key = (
-            item.ItemId,
-            item.Quality,
-            remaining,
-            cfg.IncludePurchaseTax);
-
-        if (planCache.TryGetValue(key, out var entry) &&
-            ReferenceEquals(entry.Snapshot, snapshot))
-        {
-            if (entry.Job.IsFaulted ||
-                entry.Job.IsCanceled)
-                return "Optimization failed";
-        }
-
-        return "Optimizing stacks...";
+        return "Planning shopping route...";
     }
 
     private bool QuoteNeedsVerification(
@@ -542,8 +573,7 @@ public sealed class Plugin : IDalamudPlugin
                     DateTimeKind.Utc))
                 .ToUnixTimeSeconds();
 
-            ImGui.TextDisabled(
-                "API fetched " + Age(fetched));
+            ImGui.TextDisabled("API fetched " + Age(fetched));
         }
         else
         {
@@ -572,69 +602,247 @@ public sealed class Plugin : IDalamudPlugin
             ref includeTax))
         {
             cfg.IncludePurchaseTax = includeTax;
-            planCache.Clear();
             Save();
         }
 
-        long total = 0;
-        int quoted = 0;
-        int outstanding = 0;
-        int ageWarnings = 0;
-        bool allExact = true;
+        ImGui.TextUnformatted("Route");
+        ImGui.SameLine();
+
+        ImGui.SetNextItemWidth(168f);
+
+        if (ImGui.BeginCombo(
+            "##MarketRunRouteMode",
+            cfg.PracticalRoutes
+                ? "Practical (recommended)"
+                : "Absolute Cheapest"))
+        {
+            if (ImGui.Selectable(
+                "Practical (recommended)",
+                cfg.PracticalRoutes))
+            {
+                cfg.PracticalRoutes = true;
+                Save();
+            }
+
+            if (ImGui.Selectable(
+                "Absolute Cheapest",
+                !cfg.PracticalRoutes))
+            {
+                cfg.PracticalRoutes = false;
+                Save();
+            }
+
+            ImGui.EndCombo();
+        }
+
+        RouteChoice? choice = ActiveRoute;
+
+        if (choice == null)
+        {
+            bool outstanding = Active.Items.Any(
+                x => x.Acquired < x.Quantity);
+
+            ImGui.TextDisabled(
+                outstanding
+                    ? "Preparing list-wide shopping route..."
+                    : "No outstanding materials.");
+
+            return;
+        }
+
+        string label = choice.Complete
+            ? "Estimated shopping total"
+            : "Partial estimate";
+
+        ImGui.TextColored(
+            Theme.Get(cfg, 4),
+            $"{label}: {choice.Cost:N0} gil");
+
+        ImGui.SameLine();
+
+        ImGui.TextDisabled(
+            $"({choice.Quoted}/{choice.Total} priced)" +
+            (choice.Exact ? "" : "  heuristic/incomplete"));
+
+        if (!choice.Complete)
+        {
+            ImGui.TextColored(
+                new Vector4(1f, 0.74f, 0.40f, 1f),
+                "This route does not cover every outstanding material.");
+        }
+
+        if (activeRoutes != null)
+        {
+            RouteChoice? home = activeRoutes.CurrentOnly;
+
+            if (home != null && home.Complete)
+            {
+                ImGui.TextDisabled(
+                    $"Current-world-only: {home.Cost:N0} gil");
+
+                if (cfg.PracticalRoutes)
+                {
+                    ImGui.TextDisabled(
+                        "Extra World Visit threshold: " +
+                        $"{activeRoutes.RequiredSavings:N0} gil");
+
+                    RouteChoice? oneHop = activeRoutes.BestOneHop;
+
+                    if (oneHop != null &&
+                        oneHop.Cost < home.Cost)
+                    {
+                        long potential = home.Cost - oneHop.Cost;
+
+                        if (choice == home)
+                        {
+                            ImGui.TextDisabled(
+                                $"Extra-world saving {potential:N0} gil " +
+                                "does not justify the visit.");
+                        }
+                        else
+                        {
+                            ImGui.TextColored(
+                                Theme.Get(cfg, 5),
+                                $"Saving {home.Cost - choice.Cost:N0} gil " +
+                                "vs. staying here.");
+                        }
+                    }
+                }
+                else if (choice.Complete &&
+                    home.Cost > choice.Cost)
+                {
+                    ImGui.TextDisabled(
+                        $"Saving {home.Cost - choice.Cost:N0} gil " +
+                        "vs. staying here.");
+                }
+            }
+            else if (cfg.PracticalRoutes)
+            {
+                ImGui.TextDisabled(
+                    "Current world cannot cover the entire list.");
+            }
+
+            if (cfg.PracticalRoutes)
+            {
+                ImGui.TextDisabled(activeRoutes.Advisory);
+            }
+        }
+
+        int oldMaterials = 0;
 
         foreach (var item in Active.Items)
         {
             if (item.Acquired >= item.Quantity)
                 continue;
 
-            outstanding++;
-
             var plan = GetPlan(item);
 
-            if (plan == null || !plan.Covered)
-                continue;
-
-            quoted++;
-            total += plan.Cost;
-
-            if (!plan.Exact)
-                allExact = false;
-
-            if (QuoteNeedsVerification(item, plan))
-                ageWarnings++;
-        }
-
-        if (outstanding == 0)
-        {
-            ImGui.TextDisabled("No outstanding materials.");
-        }
-        else
-        {
-            string label = quoted == outstanding
-                ? "Estimated total"
-                : "Partial estimate";
-
-            ImGui.TextColored(
-                Theme.Get(cfg, 4),
-                $"{label}: {total:N0} gil");
-
-            ImGui.SameLine();
-
-            ImGui.TextDisabled(
-                $"({quoted}/{outstanding} priced)" +
-                (allExact ? "" : "  heuristic"));
-
-            if (ageWarnings > 0)
+            if (plan != null &&
+                plan.Covered &&
+                QuoteNeedsVerification(item, plan))
             {
-                ImGui.TextColored(
-                    new Vector4(1f, 0.74f, 0.40f, 1f),
-                    $"{ageWarnings} material(s) use older " +
-                    "or undated world data. Verify before buying.");
+                oldMaterials++;
             }
         }
 
+        if (oldMaterials > 0)
+        {
+            ImGui.TextColored(
+                new Vector4(1f, 0.74f, 0.40f, 1f),
+                $"{oldMaterials} material(s) use old or " +
+                "undated market data. Verify before buying.");
+        }
+
+        if (ImGui.CollapsingHeader(
+            "World shopping plan"))
+        {
+            string currentWorld =
+                activeRoutes?.StartingWorld ?? "";
+
+            if (choice.Worlds.Length == 0)
+            {
+                ImGui.TextDisabled(
+                    "No complete purchase stacks reported.");
+            }
+            else if (ImGui.BeginChild(
+                "##MarketRunWorldPlan",
+                new Vector2(0f, 140f),
+                true))
+            {
+                foreach (string world in choice.Worlds
+                    .OrderBy(x =>
+                        string.Equals(
+                            x, currentWorld,
+                            StringComparison.OrdinalIgnoreCase)
+                            ? 0 : 1)
+                    .ThenBy(x => x))
+                {
+                    long worldCost = 0;
+                    int stacks = 0;
+
+                    foreach (var plan in choice.Plans.Values)
+                    {
+                        if (!plan.Covered)
+                            continue;
+
+                        foreach (var offer in plan.Chosen)
+                        {
+                            if (!string.Equals(
+                                offer.World, world,
+                                StringComparison.OrdinalIgnoreCase))
+                                continue;
+
+                            worldCost += PriceOptimizer.ListingCost(
+                                offer, cfg.IncludePurchaseTax);
+
+                            stacks++;
+                        }
+                    }
+
+                    string location = string.Equals(
+                        world, currentWorld,
+                        StringComparison.OrdinalIgnoreCase)
+                            ? " (current)"
+                            : "";
+
+                    ImGui.TextColored(
+                        Theme.Get(cfg, 4),
+                        $"{world}{location} - " +
+                        $"{worldCost:N0} gil / {stacks} stacks");
+
+                    foreach (var item in Active.Items)
+                    {
+                        string key =
+                            $"{item.ItemId}-{item.Quality}";
+
+                        if (!choice.Plans.TryGetValue(
+                            key, out var plan) ||
+                            !plan.Covered)
+                            continue;
+
+                        long quantity = plan.Chosen
+                            .Where(x => string.Equals(
+                                x.World, world,
+                                StringComparison.OrdinalIgnoreCase))
+                            .Sum(x => (long)x.Quantity);
+
+                        if (quantity > 0)
+                        {
+                            ImGui.TextDisabled(
+                                $"  {quantity:N0}x {item.Name}");
+                        }
+                    }
+
+                    ImGui.Separator();
+                }
+            }
+
+            if (choice.Worlds.Length > 0)
+                ImGui.EndChild();
+        }
+
         ImGui.TextDisabled(
-            "Reported listings only; API fetch time is not listing freshness.");
+            "Reported Market Board stacks; availability unverified.");
     }
 
     private void DrawOfferDetails(ShoppingItem item)
@@ -1274,7 +1482,7 @@ public sealed class Plugin : IDalamudPlugin
 
                 ImGui.Separator();
 
-                ImGui.TextDisabled("MarketRun v0.1.0 DEV2 FIX2");
+                ImGui.TextDisabled("MarketRun v0.1.0 DEV2 FIX3");
 
                 ImGui.TextDisabled(
                     "World upload ages and listing prices are estimates.");
