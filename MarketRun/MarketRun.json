@@ -2,7 +2,7 @@
     "Author":  "Dash + AI",
     "Name":  "MarketRun",
     "InternalName":  "MarketRun",
-    "AssemblyVersion":  "0.1.0.2",
+    "AssemblyVersion":  "0.1.0.3",
     "DalamudApiLevel":  15,
     "ApplicableVersion":  "any",
     "LoadRequiredState":  0,

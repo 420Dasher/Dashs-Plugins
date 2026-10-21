@@ -37,6 +37,8 @@ public sealed class Plugin : IDalamudPlugin
     private bool confirmDelete;
     private bool replaceList;
     private bool showTextEditor;
+    private bool renameList;
+    private string renameBuffer = "";
     private string selectedItemKey = "";
 
     private string importText = "";
@@ -84,7 +86,7 @@ public sealed class Plugin : IDalamudPlugin
         Pi.UiBuilder.OpenMainUi += Open;
         Pi.UiBuilder.OpenConfigUi += OpenSettings;
 
-        Log.Information("MarketRun v0.1.0 DEV1 FIX1 initialized.");
+        Log.Information("MarketRun v0.1.0 DEV1 FIX2 initialized.");
     }
 
     private void Save() => Pi.SavePluginConfig(cfg);
@@ -134,8 +136,8 @@ public sealed class Plugin : IDalamudPlugin
         try
         {
             ImGui.SetNextWindowSize(
-                new Vector2(505f, 435f),
-                ImGuiCond.FirstUseEver);
+                new Vector2(505f, 375f),
+                ImGuiCond.Once);
 
             bool open = mainOpen;
 
@@ -182,16 +184,13 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.TextColored(Theme.Get(cfg, 4), "MARKET RUN");
 
         ImGui.SameLine();
-        ImGui.TextDisabled("v0.1.0 DEV1 FIX1");
+        ImGui.TextDisabled("v0.1.0 DEV1 FIX2");
 
         ImGui.SameLine(
             MathF.Max(280f, ImGui.GetWindowWidth() - 91f));
 
         if (ImGui.SmallButton("Settings"))
             settingsOpen = true;
-
-        ImGui.TextDisabled(
-            "Material shopping and progress tracking");
 
         ImGui.Separator();
 
@@ -224,10 +223,10 @@ public sealed class Plugin : IDalamudPlugin
     {
         ImGui.Spacing();
 
+        float available = ImGui.GetContentRegionAvail().X;
+
         ImGui.SetNextItemWidth(
-            MathF.Max(
-                130f,
-                ImGui.GetContentRegionAvail().X - 177f));
+            MathF.Max(125f, available - 225f));
 
         if (ImGui.BeginCombo("##ShoppingLists", Active.Name))
         {
@@ -243,6 +242,8 @@ public sealed class Plugin : IDalamudPlugin
                     preview.Clear();
                     importStatus = "";
                     confirmDelete = false;
+                    renameList = false;
+                    selectedItemKey = "";
 
                     Save();
                 }
@@ -253,7 +254,7 @@ public sealed class Plugin : IDalamudPlugin
 
         ImGui.SameLine();
 
-        if (ImGui.SmallButton("New list"))
+        if (ImGui.SmallButton("New"))
         {
             var list = new ShoppingList
             {
@@ -265,20 +266,69 @@ public sealed class Plugin : IDalamudPlugin
 
             preview.Clear();
             confirmDelete = false;
+            renameList = false;
+            selectedItemKey = "";
 
             Save();
         }
 
         ImGui.SameLine();
 
+        if (ImGui.SmallButton("Rename"))
+        {
+            renameBuffer = Active.Name;
+            renameList = !renameList;
+            confirmDelete = false;
+        }
+
+        ImGui.SameLine();
+
         if (ImGui.SmallButton("Delete"))
-            confirmDelete = true;
+        {
+            confirmDelete = !confirmDelete;
+            renameList = false;
+        }
+
+        if (renameList)
+        {
+            ImGui.SetNextItemWidth(
+                MathF.Max(
+                    130f,
+                    ImGui.GetContentRegionAvail().X - 155f));
+
+            ImGui.InputText(
+                "##RenameListInput",
+                ref renameBuffer,
+                96);
+
+            ImGui.SameLine();
+
+            if (ImGui.SmallButton("Save name"))
+            {
+                string name = renameBuffer.Trim();
+
+                if (name.Length > 0)
+                {
+                    Active.Name = name;
+                    Save();
+                }
+
+                renameList = false;
+            }
+
+            ImGui.SameLine();
+
+            if (ImGui.SmallButton("Cancel##Rename"))
+            {
+                renameList = false;
+            }
+        }
 
         if (confirmDelete)
         {
             ImGui.TextColored(
                 new Vector4(1f, 0.68f, 0.35f, 1f),
-                "Delete the current list?");
+                "Delete this shopping list?");
 
             if (ImGui.SmallButton("Confirm delete"))
             {
@@ -290,6 +340,7 @@ public sealed class Plugin : IDalamudPlugin
                 cfg.ActiveListId = cfg.Lists[0].Id;
 
                 confirmDelete = false;
+                selectedItemKey = "";
                 preview.Clear();
 
                 Save();
@@ -297,21 +348,8 @@ public sealed class Plugin : IDalamudPlugin
 
             ImGui.SameLine();
 
-            if (ImGui.SmallButton("Cancel"))
+            if (ImGui.SmallButton("Cancel##Delete"))
                 confirmDelete = false;
-        }
-
-        string name = Active.Name;
-
-        ImGui.SetNextItemWidth(-1f);
-
-        if (ImGui.InputText("##ListName", ref name, 96))
-        {
-            Active.Name = string.IsNullOrWhiteSpace(name)
-                ? "Shopping List"
-                : name;
-
-            Save();
         }
     }
 
@@ -324,8 +362,12 @@ public sealed class Plugin : IDalamudPlugin
 
         ImGui.Spacing();
 
-        ImGui.TextColored(Theme.Get(cfg, 4), "MATERIALS");
+        ImGui.TextColored(
+            Theme.Get(cfg, 4),
+            "MATERIALS");
+
         ImGui.SameLine();
+
         ImGui.TextDisabled(
             $"{completed} / {list.Items.Count} complete");
 
@@ -336,47 +378,12 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.Spacing();
             ImGui.TextDisabled("No materials imported yet.");
             ImGui.TextDisabled(
-                "Open the Import tab to add materials.");
+                "Use the Import tab to add materials.");
             return;
         }
 
-        // Only one selected item exposes editing controls.
-        // All other items remain compact single-line entries.
-        if (ImGui.BeginChild(
-            "##MarketRunCompactItems",
-            new Vector2(0f, 215f),
-            true))
-        {
-            foreach (var item in list.Items)
-            {
-                string key = $"{item.ItemId}-{item.Quality}";
-
-                bool done = item.Acquired >= item.Quantity;
-                int remaining = Math.Max(
-                    0, item.Quantity - item.Acquired);
-
-                string quality = item.Quality switch
-                {
-                    2 => " [HQ]",
-                    1 => " [NQ]",
-                    _ => ""
-                };
-
-                string row =
-                    $"{(done ? "[x]" : "[ ]")} " +
-                    $"{item.Name}{quality}  " +
-                    $"{remaining:N0} left";
-
-                bool selected = selectedItemKey == key;
-
-                if (ImGui.Selectable(
-                    row + "##" + key, selected))
-                    selectedItemKey = key;
-            }
-        }
-
-        ImGui.EndChild();
-
+        // Resolve the selected item before drawing the list.
+        // The editor remains visible above the scrollable rows.
         var selectedItem = list.Items.FirstOrDefault(
             x => $"{x.ItemId}-{x.Quality}" == selectedItemKey);
 
@@ -390,34 +397,43 @@ public sealed class Plugin : IDalamudPlugin
                 $"{selectedItem.ItemId}-{selectedItem.Quality}";
         }
 
-        ImGui.Spacing();
+        string selectedQuality = selectedItem.Quality switch
+        {
+            2 => " [HQ]",
+            1 => " [NQ]",
+            _ => ""
+        };
 
         ImGui.TextColored(
             Theme.Get(cfg, 4),
-            "SELECTED MATERIAL");
+            "SELECTED");
 
-        ImGui.TextWrapped(selectedItem.Name);
+        ImGui.SameLine();
+
+        ImGui.TextUnformatted(
+            selectedItem.Name + selectedQuality);
 
         int needed = selectedItem.Quantity;
         int acquired = selectedItem.Acquired;
 
-        ImGui.SetNextItemWidth(92f);
+        ImGui.SetNextItemWidth(84f);
 
         if (ImGui.InputInt(
             "Needed##Selected", ref needed, 0, 0))
         {
-            selectedItem.Quantity =
-                Math.Clamp(needed, 1, 999999);
+            selectedItem.Quantity = Math.Clamp(
+                needed, 1, 999999);
 
             selectedItem.Acquired = Math.Min(
-                selectedItem.Acquired, selectedItem.Quantity);
+                selectedItem.Acquired,
+                selectedItem.Quantity);
 
             Save();
         }
 
         ImGui.SameLine();
 
-        ImGui.SetNextItemWidth(92f);
+        ImGui.SetNextItemWidth(84f);
 
         if (ImGui.InputInt(
             "Acquired##Selected", ref acquired, 0, 0))
@@ -428,25 +444,91 @@ public sealed class Plugin : IDalamudPlugin
             Save();
         }
 
-        bool doneNow =
+        bool done =
             selectedItem.Acquired >= selectedItem.Quantity;
 
-        if (ImGui.Button(doneNow ? "Reset" : "Complete"))
+        if (ImGui.SmallButton(
+            done ? "Reset progress" : "Mark complete"))
         {
             selectedItem.Acquired =
-                doneNow ? 0 : selectedItem.Quantity;
+                done ? 0 : selectedItem.Quantity;
 
             Save();
         }
 
         ImGui.SameLine();
 
-        if (ImGui.Button("Remove selected"))
+        if (ImGui.SmallButton("Remove selected"))
         {
             list.Items.Remove(selectedItem);
             selectedItemKey = "";
+
             Save();
+            return;
         }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Size the list according to its content.
+        // One material no longer reserves a huge empty area.
+        // Large lists remain scrollable.
+        float rowHeight =
+            ImGui.GetTextLineHeightWithSpacing() + 4f;
+
+        float desiredHeight = MathF.Min(
+            210f,
+            12f + list.Items.Count * rowHeight);
+
+        float availableHeight =
+            ImGui.GetContentRegionAvail().Y;
+
+        float listHeight = MathF.Min(
+            desiredHeight,
+            MathF.Max(35f, availableHeight - 8f));
+
+        if (ImGui.BeginChild(
+            "##MarketRunCompactItems",
+            new Vector2(0f, listHeight),
+            true))
+        {
+            foreach (var item in list.Items)
+            {
+                string key =
+                    $"{item.ItemId}-{item.Quality}";
+
+                bool itemDone =
+                    item.Acquired >= item.Quantity;
+
+                int remaining = Math.Max(
+                    0,
+                    item.Quantity - item.Acquired);
+
+                string quality = item.Quality switch
+                {
+                    2 => " [HQ]",
+                    1 => " [NQ]",
+                    _ => ""
+                };
+
+                string label =
+                    (itemDone ? "[x] " : "[ ] ") +
+                    item.Name + quality +
+                    $"  -  {remaining:N0} left";
+
+                bool selected =
+                    selectedItemKey == key;
+
+                if (ImGui.Selectable(
+                    label + "##" + key,
+                    selected))
+                {
+                    selectedItemKey = key;
+                }
+            }
+        }
+
+        ImGui.EndChild();
     }
 
     private void DrawImport()
@@ -735,7 +817,7 @@ public sealed class Plugin : IDalamudPlugin
 
                 ImGui.Separator();
 
-                ImGui.TextDisabled("MarketRun v0.1.0 DEV1 FIX1");
+                ImGui.TextDisabled("MarketRun v0.1.0 DEV1 FIX2");
 
                 ImGui.TextDisabled(
                     "Universalis integration begins in DEV2.");
