@@ -150,11 +150,11 @@
     "Name":  "MarketRun",
     "InternalName":  "MarketRun",
     "AssemblyVersion":  "0.0.0.0",
-    "TestingAssemblyVersion":  "0.1.0.3",
+    "TestingAssemblyVersion":  "0.1.0.4",
     "Description":  "Import materials, manage shopping lists and track required quantities. Universalis price optimization and guided purchasing are planned.",
     "Punchline":  "Plan your next Market Board run.",
     "Changelog":  "Initial testing build.",
-    "TestingChangelog":  "DEV1 FIX2: Compact adaptive shopping list, always-visible selected-item editing, Rename button and smaller main window.",
+    "TestingChangelog":  "DEV2: Universalis DC-wide current listings, quantity-aware full-stack estimates, per-item recommended stacks, listing freshness and manual refresh.",
     "ApplicableVersion":  "any",
     "Tags":  [
                  "market board",
