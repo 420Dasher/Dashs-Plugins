@@ -31,6 +31,11 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly Configuration cfg;
     private readonly MaterialImporter importer;
+    private readonly MarketPricing pricing = new();
+
+    private readonly Dictionary<
+        (uint Id, int Quality, int Remaining),
+        (MarketSnapshot Snapshot, PurchasePlan Plan)> planCache = new();
 
     private bool mainOpen;
     private bool settingsOpen;
@@ -86,7 +91,7 @@ public sealed class Plugin : IDalamudPlugin
         Pi.UiBuilder.OpenMainUi += Open;
         Pi.UiBuilder.OpenConfigUi += OpenSettings;
 
-        Log.Information("MarketRun v0.1.0 DEV1 FIX2 initialized.");
+        Log.Information("MarketRun v0.1.0 DEV2 initialized.");
     }
 
     private void Save() => Pi.SavePluginConfig(cfg);
@@ -112,6 +117,7 @@ public sealed class Plugin : IDalamudPlugin
 
         Commands.RemoveHandler("/mrun");
         Commands.RemoveHandler("/shoplist");
+        pricing.Dispose();
     }
 
     private void Draw()
@@ -136,7 +142,7 @@ public sealed class Plugin : IDalamudPlugin
         try
         {
             ImGui.SetNextWindowSize(
-                new Vector2(505f, 375f),
+                new Vector2(540f, 460f),
                 ImGuiCond.Once);
 
             bool open = mainOpen;
@@ -153,10 +159,17 @@ public sealed class Plugin : IDalamudPlugin
                 DrawHeader();
                 DrawLists();
 
+                pricing.Ensure(
+                    cfg.DataCenter,
+                    Active.Items
+                        .Where(x => x.Acquired < x.Quantity)
+                        .Select(x => x.ItemId));
+
                 if (ImGui.BeginTabBar("##MarketRunTabs"))
                 {
                     if (ImGui.BeginTabItem("Shopping List"))
                     {
+                        DrawPriceControls();
                         DrawMaterials();
                         ImGui.EndTabItem();
                     }
@@ -184,7 +197,7 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.TextColored(Theme.Get(cfg, 4), "MARKET RUN");
 
         ImGui.SameLine();
-        ImGui.TextDisabled("v0.1.0 DEV1 FIX2");
+        ImGui.TextDisabled("v0.1.0 DEV2");
 
         ImGui.SameLine(
             MathF.Max(280f, ImGui.GetWindowWidth() - 91f));
@@ -353,6 +366,240 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    private PurchasePlan? GetPlan(ShoppingItem item)
+    {
+        int remaining = Math.Max(
+            0, item.Quantity - item.Acquired);
+
+        if (remaining == 0)
+            return null;
+
+        var snapshot = pricing.Get(cfg.DataCenter, item.ItemId);
+
+        if (snapshot == null)
+            return null;
+
+        var key = (item.ItemId, item.Quality, remaining);
+
+        if (planCache.TryGetValue(key, out var existing) &&
+            ReferenceEquals(existing.Snapshot, snapshot))
+            return existing.Plan;
+
+        var plan = PriceOptimizer.Calculate(
+            snapshot.Offers,
+            remaining,
+            item.Quality);
+
+        planCache[key] = (snapshot, plan);
+
+        // Remove stale optimization results occasionally.
+        if (planCache.Count > 512)
+        {
+            planCache.Clear();
+            planCache[key] = (snapshot, plan);
+        }
+
+        return plan;
+    }
+
+    private static string Age(long timestamp)
+    {
+        if (timestamp <= 0 || timestamp > 253402300799)
+            return "age unknown";
+
+        var elapsed = DateTimeOffset.UtcNow -
+            DateTimeOffset.FromUnixTimeSeconds(timestamp);
+
+        if (elapsed.TotalSeconds < 0)
+            return "time uncertain";
+
+        if (elapsed.TotalMinutes < 60)
+            return $"{Math.Max(0, (int)elapsed.TotalMinutes)}m ago";
+
+        if (elapsed.TotalHours < 24)
+            return $"{(int)elapsed.TotalHours}h ago";
+
+        return $"{(int)elapsed.TotalDays}d ago";
+    }
+
+    private void DrawPriceControls()
+    {
+        ImGui.Spacing();
+
+        if (ImGui.SmallButton("Refresh prices"))
+        {
+            pricing.Refresh(
+                cfg.DataCenter,
+                Active.Items
+                    .Where(x => x.Acquired < x.Quantity)
+                    .Select(x => x.ItemId));
+        }
+
+        ImGui.SameLine();
+
+        if (pricing.IsLoading)
+            ImGui.TextDisabled("Fetching Universalis listings...");
+        else if (pricing.LastSuccessUtc != DateTime.MinValue)
+            ImGui.TextDisabled(
+                "Updated " + Age(
+                    new DateTimeOffset(
+                        DateTime.SpecifyKind(
+                            pricing.LastSuccessUtc,
+                            DateTimeKind.Utc))
+                    .ToUnixTimeSeconds()));
+        else
+            ImGui.TextDisabled("No market data loaded.");
+
+        if (pricing.Error.Length > 0)
+        {
+            ImGui.TextColored(
+                new Vector4(1f, 0.65f, 0.35f, 1f),
+                pricing.Error);
+        }
+
+        long total = 0;
+        int quoted = 0;
+        int outstanding = 0;
+        bool allExact = true;
+
+        foreach (var item in Active.Items)
+        {
+            if (item.Acquired >= item.Quantity)
+                continue;
+
+            outstanding++;
+
+            var plan = GetPlan(item);
+
+            if (plan == null || !plan.Covered)
+                continue;
+
+            quoted++;
+            total += plan.Cost;
+
+            if (!plan.Exact)
+                allExact = false;
+        }
+
+        if (outstanding == 0)
+        {
+            ImGui.TextDisabled("No outstanding materials.");
+        }
+        else
+        {
+            string label = quoted == outstanding
+                ? "Estimated total"
+                : "Partial estimate";
+
+            ImGui.TextColored(
+                Theme.Get(cfg, 4),
+                $"{label}: {total:N0} gil");
+
+            ImGui.SameLine();
+
+            ImGui.TextDisabled(
+                $"({quoted}/{outstanding} priced)" +
+                (allExact ? "" : "  heuristic"));
+        }
+
+        ImGui.TextDisabled(
+            "Universalis estimates; prices exclude purchase tax.");
+    }
+
+    private void DrawOfferDetails(ShoppingItem item)
+    {
+        var snapshot = pricing.Get(cfg.DataCenter, item.ItemId);
+        var plan = GetPlan(item);
+
+        if (snapshot == null)
+            return;
+
+        if (!ImGui.CollapsingHeader(
+            "Recommended purchase stacks"))
+            return;
+
+        ImGui.Spacing();
+
+        if (plan == null)
+        {
+            ImGui.TextDisabled("This material is complete.");
+            return;
+        }
+
+        if (!plan.Covered)
+        {
+            ImGui.TextWrapped(
+                "Not enough reported listings to cover the " +
+                "remaining quantity across this data center.");
+
+            ImGui.TextDisabled(
+                $"{snapshot.Offers.Count} reported listings.");
+            return;
+        }
+
+        ImGui.TextColored(
+            Theme.Get(cfg, 5),
+            $"{plan.Cost:N0} gil  |  {plan.WorldLabel}");
+
+        ImGui.TextDisabled(
+            $"{plan.Units:N0} units for {plan.Needed:N0} needed" +
+            (plan.Units > plan.Needed
+                ? $"  ({plan.Units - plan.Needed:N0} extra)"
+                : ""));
+
+        if (!plan.Exact)
+        {
+            ImGui.TextColored(
+                new Vector4(1f, 0.74f, 0.40f, 1f),
+                "Heuristic estimate; not a guaranteed minimum.");
+        }
+
+        ImGui.TextDisabled(
+            "Reported stacks, not live purchase confirmations.");
+
+        if (ImGui.BeginChild(
+            "##MarketRunOffers",
+            new Vector2(0f, 125f),
+            true))
+        {
+            foreach (var offer in plan.Chosen
+                .OrderBy(x => x.World)
+                .ThenBy(x => x.PricePerUnit))
+            {
+                ImGui.TextWrapped(
+                    $"{offer.World}  |  {offer.Quantity:N0} x " +
+                    $"{offer.PricePerUnit:N0} = {offer.Total:N0} gil");
+
+                ImGui.TextDisabled(
+                    (offer.Retainer.Length == 0
+                        ? "Retainer unknown"
+                        : offer.Retainer) +
+                    "  |  " + Age(offer.ReviewedAt));
+
+                ImGui.Separator();
+            }
+        }
+
+        ImGui.EndChild();
+
+        long oldest = plan.Chosen
+            .Select(x => x.ReviewedAt)
+            .DefaultIfEmpty(0)
+            .Min();
+
+        if (oldest == 0)
+        {
+            ImGui.TextDisabled(
+                "Some listing timestamps are unavailable.");
+        }
+        else if (DateTimeOffset.UtcNow.ToUnixTimeSeconds() -
+                 oldest > 86400)
+        {
+            ImGui.TextColored(
+                new Vector4(1f, 0.70f, 0.35f, 1f),
+                "Warning: At least one selected listing is over 24h old.");
+        }
+    }
     private void DrawMaterials()
     {
         var list = Active;
@@ -511,10 +758,21 @@ public sealed class Plugin : IDalamudPlugin
                     _ => ""
                 };
 
+                var quote = GetPlan(item);
+
+                string priceText = remaining == 0
+                    ? "Done"
+                    : quote == null
+                        ? "Price pending"
+                        : quote.Covered
+                            ? $"{quote.Cost:N0} g  |  {quote.WorldLabel}" +
+                              (quote.Exact ? "" : " *")
+                            : "No complete offer";
+
                 string label =
                     (itemDone ? "[x] " : "[ ] ") +
                     item.Name + quality +
-                    $"  -  {remaining:N0} left";
+                    $"  -  {remaining:N0} left  |  {priceText}";
 
                 bool selected =
                     selectedItemKey == key;
@@ -529,6 +787,8 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ImGui.EndChild();
+
+        DrawOfferDetails(selectedItem);
     }
 
     private void DrawImport()
@@ -817,7 +1077,7 @@ public sealed class Plugin : IDalamudPlugin
 
                 ImGui.Separator();
 
-                ImGui.TextDisabled("MarketRun v0.1.0 DEV1 FIX2");
+                ImGui.TextDisabled("MarketRun v0.1.0 DEV2");
 
                 ImGui.TextDisabled(
                     "Universalis integration begins in DEV2.");
