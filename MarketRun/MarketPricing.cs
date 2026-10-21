@@ -65,7 +65,7 @@ internal sealed class MarketPricing : IDisposable
     {
         http.Timeout = TimeSpan.FromSeconds(25);
         http.DefaultRequestHeaders.UserAgent.ParseAdd(
-            "MarketRun/0.1.0.5");
+            "MarketRun/0.1.0.6");
     }
 
     public bool IsLoading
@@ -486,8 +486,11 @@ internal static class PriceOptimizer
     // Exact optimization for ordinary shopping quantities.
     // Larger cases use a labeled heuristic to avoid
     // excessive CPU and memory use on Dalamud's UI thread.
-    private const int ExactQuantityLimit = 3000;
-    private const int ExactListingLimit = 120;
+    // Work-based limit rather than an arbitrary listing count.
+    // 32 required units with thousands of listings remains exact.
+    // Very large problems retain the labeled heuristic fallback.
+    private const int ExactQuantityLimit = 12000;
+    private const long ExactWorkLimit = 6000000;
 
     public static PurchasePlan Calculate(
         IEnumerable<MarketOffer> offers,
@@ -529,7 +532,8 @@ internal static class PriceOptimizer
         }
 
         if (needed <= ExactQuantityLimit &&
-            eligible.Count <= ExactListingLimit)
+            (long)eligible.Count * (needed + 1L)
+                <= ExactWorkLimit)
             return Exact(eligible, needed, includeTax);
 
         return Heuristic(eligible, needed, includeTax);
@@ -543,8 +547,13 @@ internal static class PriceOptimizer
         const long Infinity = long.MaxValue / 4;
 
         long[] costs = new long[needed + 1];
+        long[] units = new long[needed + 1];
+
         Array.Fill(costs, Infinity);
+        Array.Fill(units, Infinity);
+
         costs[0] = 0;
+        units[0] = 0;
 
         // Each stage records where an improved state came from.
         // Reconstruction cannot reuse one listing twice.
@@ -553,6 +562,7 @@ internal static class PriceOptimizer
         foreach (var offer in offers)
         {
             long[] next = (long[])costs.Clone();
+            long[] nextUnits = (long[])units.Clone();
 
             int[] selectedFrom = new int[needed + 1];
             Array.Fill(selectedFrom, -1);
@@ -569,15 +579,22 @@ internal static class PriceOptimizer
                 long candidate = costs[quantity] +
                     ListingCost(offer, includeTax);
 
-                if (candidate >= next[destination])
+                long candidateUnits =
+                    units[quantity] + offer.Quantity;
+
+                if (candidate > next[destination] ||
+                    (candidate == next[destination] &&
+                     candidateUnits >= nextUnits[destination]))
                     continue;
 
                 next[destination] = candidate;
+                nextUnits[destination] = candidateUnits;
                 selectedFrom[destination] = quantity;
             }
 
             predecessors.Add(selectedFrom);
             costs = next;
+            units = nextUnits;
         }
 
         if (costs[needed] == Infinity)

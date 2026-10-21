@@ -35,7 +35,11 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly Dictionary<
         (uint Id, int Quality, int Remaining, bool Tax),
-        (MarketSnapshot Snapshot, PurchasePlan Plan)> planCache = new();
+        (MarketSnapshot Snapshot, Task<PurchasePlan> Job)> planCache = new();
+
+    // At most two expensive optimizations execute together.
+    private static readonly SemaphoreSlim OptimizationSlots =
+        new(2, 2);
 
     private bool mainOpen;
     private bool settingsOpen;
@@ -91,7 +95,7 @@ public sealed class Plugin : IDalamudPlugin
         Pi.UiBuilder.OpenMainUi += Open;
         Pi.UiBuilder.OpenConfigUi += OpenSettings;
 
-        Log.Information("MarketRun v0.1.0 DEV2 FIX1 initialized.");
+        Log.Information("MarketRun v0.1.0 DEV2 FIX2 initialized.");
     }
 
     private void Save() => Pi.SavePluginConfig(cfg);
@@ -197,7 +201,7 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.TextColored(Theme.Get(cfg, 4), "MARKET RUN");
 
         ImGui.SameLine();
-        ImGui.TextDisabled("v0.1.0 DEV2 FIX1");
+        ImGui.TextDisabled("v0.1.0 DEV2 FIX2");
 
         ImGui.SameLine(
             MathF.Max(280f, ImGui.GetWindowWidth() - 91f));
@@ -366,6 +370,31 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    private static async Task<PurchasePlan> OptimizeAsync(
+        MarketOffer[] offers,
+        int remaining,
+        int quality,
+        bool includeTax)
+    {
+        await OptimizationSlots.WaitAsync()
+            .ConfigureAwait(false);
+
+        try
+        {
+            return await Task.Run(() =>
+                PriceOptimizer.Calculate(
+                    offers,
+                    remaining,
+                    quality,
+                    includeTax))
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            OptimizationSlots.Release();
+        }
+    }
+
     private PurchasePlan? GetPlan(ShoppingItem item)
     {
         int remaining = Math.Max(
@@ -374,7 +403,8 @@ public sealed class Plugin : IDalamudPlugin
         if (remaining == 0)
             return null;
 
-        var snapshot = pricing.Get(cfg.DataCenter, item.ItemId);
+        var snapshot = pricing.Get(
+            cfg.DataCenter, item.ItemId);
 
         if (snapshot == null)
             return null;
@@ -387,24 +417,60 @@ public sealed class Plugin : IDalamudPlugin
 
         if (planCache.TryGetValue(key, out var existing) &&
             ReferenceEquals(existing.Snapshot, snapshot))
-            return existing.Plan;
+        {
+            if (existing.Job.IsCompletedSuccessfully)
+                return existing.Job.Result;
 
-        var plan = PriceOptimizer.Calculate(
-            snapshot.Offers,
+            return null;
+        }
+
+        // Capture immutable inputs on the drawing thread.
+        // No configuration or ImGui access occurs in the task.
+        MarketOffer[] offers = snapshot.Offers.ToArray();
+
+        Task<PurchasePlan> job = OptimizeAsync(
+            offers,
             remaining,
             item.Quality,
             cfg.IncludePurchaseTax);
 
-        planCache[key] = (snapshot, plan);
+        planCache[key] = (snapshot, job);
 
-        // Remove stale optimization results occasionally.
         if (planCache.Count > 512)
         {
             planCache.Clear();
-            planCache[key] = (snapshot, plan);
+            planCache[key] = (snapshot, job);
         }
 
-        return plan;
+        return null;
+    }
+
+    private string PlanPendingText(ShoppingItem item)
+    {
+        var snapshot = pricing.Get(
+            cfg.DataCenter, item.ItemId);
+
+        if (snapshot == null)
+            return "Price pending";
+
+        int remaining = Math.Max(
+            0, item.Quantity - item.Acquired);
+
+        var key = (
+            item.ItemId,
+            item.Quality,
+            remaining,
+            cfg.IncludePurchaseTax);
+
+        if (planCache.TryGetValue(key, out var entry) &&
+            ReferenceEquals(entry.Snapshot, snapshot))
+        {
+            if (entry.Job.IsFaulted ||
+                entry.Job.IsCanceled)
+                return "Optimization failed";
+        }
+
+        return "Optimizing stacks...";
     }
 
     private bool QuoteNeedsVerification(
@@ -589,7 +655,10 @@ public sealed class Plugin : IDalamudPlugin
 
         if (plan == null)
         {
-            ImGui.TextDisabled("This material is complete.");
+            ImGui.TextDisabled(
+                item.Acquired >= item.Quantity
+                    ? "This material is complete."
+                    : PlanPendingText(item));
             return;
         }
 
@@ -888,7 +957,7 @@ public sealed class Plugin : IDalamudPlugin
                 string priceText = remaining == 0
                     ? "Done"
                     : quote == null
-                        ? "Price pending"
+                        ? PlanPendingText(item)
                         : quote.Covered
                             ? $"{quote.Cost:N0} g  |  {quote.WorldLabel}" +
                               (quote.Exact ? "" : " *") +
@@ -1205,7 +1274,7 @@ public sealed class Plugin : IDalamudPlugin
 
                 ImGui.Separator();
 
-                ImGui.TextDisabled("MarketRun v0.1.0 DEV2 FIX1");
+                ImGui.TextDisabled("MarketRun v0.1.0 DEV2 FIX2");
 
                 ImGui.TextDisabled(
                     "World upload ages and listing prices are estimates.");
