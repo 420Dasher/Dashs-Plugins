@@ -34,7 +34,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly MarketPricing pricing = new();
 
     private readonly Dictionary<
-        (uint Id, int Quality, int Remaining),
+        (uint Id, int Quality, int Remaining, bool Tax),
         (MarketSnapshot Snapshot, PurchasePlan Plan)> planCache = new();
 
     private bool mainOpen;
@@ -91,7 +91,7 @@ public sealed class Plugin : IDalamudPlugin
         Pi.UiBuilder.OpenMainUi += Open;
         Pi.UiBuilder.OpenConfigUi += OpenSettings;
 
-        Log.Information("MarketRun v0.1.0 DEV2 initialized.");
+        Log.Information("MarketRun v0.1.0 DEV2 FIX1 initialized.");
     }
 
     private void Save() => Pi.SavePluginConfig(cfg);
@@ -197,7 +197,7 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.TextColored(Theme.Get(cfg, 4), "MARKET RUN");
 
         ImGui.SameLine();
-        ImGui.TextDisabled("v0.1.0 DEV2");
+        ImGui.TextDisabled("v0.1.0 DEV2 FIX1");
 
         ImGui.SameLine(
             MathF.Max(280f, ImGui.GetWindowWidth() - 91f));
@@ -379,7 +379,11 @@ public sealed class Plugin : IDalamudPlugin
         if (snapshot == null)
             return null;
 
-        var key = (item.ItemId, item.Quality, remaining);
+        var key = (
+            item.ItemId,
+            item.Quality,
+            remaining,
+            cfg.IncludePurchaseTax);
 
         if (planCache.TryGetValue(key, out var existing) &&
             ReferenceEquals(existing.Snapshot, snapshot))
@@ -388,7 +392,8 @@ public sealed class Plugin : IDalamudPlugin
         var plan = PriceOptimizer.Calculate(
             snapshot.Offers,
             remaining,
-            item.Quality);
+            item.Quality,
+            cfg.IncludePurchaseTax);
 
         planCache[key] = (snapshot, plan);
 
@@ -400,6 +405,28 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         return plan;
+    }
+
+    private bool QuoteNeedsVerification(
+        ShoppingItem item,
+        PurchasePlan plan)
+    {
+        var snapshot = pricing.Get(
+            cfg.DataCenter, item.ItemId);
+
+        if (snapshot == null || !plan.Covered)
+            return false;
+
+        long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+        return plan.Chosen.Any(offer =>
+        {
+            long uploaded = snapshot.UploadedAtSeconds(offer);
+
+            // Missing data also deserves verification.
+            return uploaded <= 0 ||
+                now - uploaded > 7200;
+        });
     }
 
     private static string Age(long timestamp)
@@ -438,17 +465,32 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.SameLine();
 
         if (pricing.IsLoading)
-            ImGui.TextDisabled("Fetching Universalis listings...");
+        {
+            ImGui.TextDisabled("Fetching Universalis...");
+        }
         else if (pricing.LastSuccessUtc != DateTime.MinValue)
+        {
+            long fetched = new DateTimeOffset(
+                DateTime.SpecifyKind(
+                    pricing.LastSuccessUtc,
+                    DateTimeKind.Utc))
+                .ToUnixTimeSeconds();
+
             ImGui.TextDisabled(
-                "Updated " + Age(
-                    new DateTimeOffset(
-                        DateTime.SpecifyKind(
-                            pricing.LastSuccessUtc,
-                            DateTimeKind.Utc))
-                    .ToUnixTimeSeconds()));
+                "API fetched " + Age(fetched));
+        }
         else
-            ImGui.TextDisabled("No market data loaded.");
+        {
+            ImGui.TextDisabled("No prices loaded.");
+        }
+
+        int wait = pricing.ManualRefreshWaitSeconds;
+
+        if (wait > 0 && !pricing.IsLoading)
+        {
+            ImGui.SameLine();
+            ImGui.TextDisabled($"Refresh in {wait}s");
+        }
 
         if (pricing.Error.Length > 0)
         {
@@ -457,9 +499,21 @@ public sealed class Plugin : IDalamudPlugin
                 pricing.Error);
         }
 
+        bool includeTax = cfg.IncludePurchaseTax;
+
+        if (ImGui.Checkbox(
+            "Include estimated 5% purchase tax",
+            ref includeTax))
+        {
+            cfg.IncludePurchaseTax = includeTax;
+            planCache.Clear();
+            Save();
+        }
+
         long total = 0;
         int quoted = 0;
         int outstanding = 0;
+        int ageWarnings = 0;
         bool allExact = true;
 
         foreach (var item in Active.Items)
@@ -479,6 +533,9 @@ public sealed class Plugin : IDalamudPlugin
 
             if (!plan.Exact)
                 allExact = false;
+
+            if (QuoteNeedsVerification(item, plan))
+                ageWarnings++;
         }
 
         if (outstanding == 0)
@@ -500,15 +557,25 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.TextDisabled(
                 $"({quoted}/{outstanding} priced)" +
                 (allExact ? "" : "  heuristic"));
+
+            if (ageWarnings > 0)
+            {
+                ImGui.TextColored(
+                    new Vector4(1f, 0.74f, 0.40f, 1f),
+                    $"{ageWarnings} material(s) use older " +
+                    "or undated world data. Verify before buying.");
+            }
         }
 
         ImGui.TextDisabled(
-            "Universalis estimates; prices exclude purchase tax.");
+            "Reported listings only; API fetch time is not listing freshness.");
     }
 
     private void DrawOfferDetails(ShoppingItem item)
     {
-        var snapshot = pricing.Get(cfg.DataCenter, item.ItemId);
+        var snapshot = pricing.Get(
+            cfg.DataCenter, item.ItemId);
+
         var plan = GetPlan(item);
 
         if (snapshot == null)
@@ -529,11 +596,12 @@ public sealed class Plugin : IDalamudPlugin
         if (!plan.Covered)
         {
             ImGui.TextWrapped(
-                "Not enough reported listings to cover the " +
-                "remaining quantity across this data center.");
+                "Reported listings do not cover the " +
+                "remaining quantity with complete stacks.");
 
             ImGui.TextDisabled(
                 $"{snapshot.Offers.Count} reported listings.");
+
             return;
         }
 
@@ -547,6 +615,17 @@ public sealed class Plugin : IDalamudPlugin
                 ? $"  ({plan.Units - plan.Needed:N0} extra)"
                 : ""));
 
+        if (cfg.IncludePurchaseTax)
+        {
+            ImGui.TextDisabled(
+                "Total includes estimated 5% purchase tax.");
+        }
+        else
+        {
+            ImGui.TextDisabled(
+                "Total excludes purchase tax.");
+        }
+
         if (!plan.Exact)
         {
             ImGui.TextColored(
@@ -554,52 +633,98 @@ public sealed class Plugin : IDalamudPlugin
                 "Heuristic estimate; not a guaranteed minimum.");
         }
 
+        // The worst world upload age is more relevant than
+        // the time we fetched this response.
+        long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+        long[] uploadTimes = plan.Chosen
+            .Select(x => snapshot.UploadedAtSeconds(x))
+            .Where(x => x > 0)
+            .ToArray();
+
+        bool unknownUpload = plan.Chosen.Any(
+            x => snapshot.UploadedAtSeconds(x) <= 0);
+
+        if (uploadTimes.Length > 0)
+        {
+            long oldestUpload = uploadTimes.Min();
+
+            ImGui.TextDisabled(
+                "Oldest selected world upload: " +
+                Age(oldestUpload));
+
+            if (now - oldestUpload > 7200)
+            {
+                ImGui.TextColored(
+                    new Vector4(1f, 0.74f, 0.40f, 1f),
+                    "Older than 2 hours. Check the live Market Board.");
+            }
+        }
+
+        if (unknownUpload)
+        {
+            ImGui.TextColored(
+                new Vector4(1f, 0.74f, 0.40f, 1f),
+                "Upload age unavailable for some selected stacks.");
+        }
+
         ImGui.TextDisabled(
-            "Reported stacks, not live purchase confirmations.");
+            "Listings may have sold since the last upload.");
 
         if (ImGui.BeginChild(
             "##MarketRunOffers",
-            new Vector2(0f, 125f),
+            new Vector2(0f, 170f),
             true))
         {
             foreach (var offer in plan.Chosen
                 .OrderBy(x => x.World)
                 .ThenBy(x => x.PricePerUnit))
             {
+                long stackCost = PriceOptimizer.ListingCost(
+                    offer,
+                    cfg.IncludePurchaseTax);
+
                 ImGui.TextWrapped(
-                    $"{offer.World}  |  {offer.Quantity:N0} x " +
-                    $"{offer.PricePerUnit:N0} = {offer.Total:N0} gil");
+                    $"{offer.World}  |  " +
+                    $"{offer.Quantity:N0} x " +
+                    $"{offer.PricePerUnit:N0} = " +
+                    $"{stackCost:N0} gil" +
+                    (cfg.IncludePurchaseTax ? " incl. tax" : ""));
 
                 ImGui.TextDisabled(
-                    (offer.Retainer.Length == 0
+                    offer.Retainer.Length == 0
                         ? "Retainer unknown"
-                        : offer.Retainer) +
-                    "  |  " + Age(offer.ReviewedAt));
+                        : offer.Retainer);
+
+                long uploaded =
+                    snapshot.UploadedAtSeconds(offer);
+
+                if (uploaded > 0)
+                {
+                    ImGui.TextDisabled(
+                        "World/item last uploaded: " +
+                        Age(uploaded));
+                }
+                else
+                {
+                    ImGui.TextDisabled(
+                        "World/item upload time unavailable");
+                }
+
+                if (offer.ReviewedAt > 0)
+                {
+                    ImGui.TextDisabled(
+                        "Listing timestamp: " +
+                        Age(offer.ReviewedAt));
+                }
 
                 ImGui.Separator();
             }
         }
 
         ImGui.EndChild();
-
-        long oldest = plan.Chosen
-            .Select(x => x.ReviewedAt)
-            .DefaultIfEmpty(0)
-            .Min();
-
-        if (oldest == 0)
-        {
-            ImGui.TextDisabled(
-                "Some listing timestamps are unavailable.");
-        }
-        else if (DateTimeOffset.UtcNow.ToUnixTimeSeconds() -
-                 oldest > 86400)
-        {
-            ImGui.TextColored(
-                new Vector4(1f, 0.70f, 0.35f, 1f),
-                "Warning: At least one selected listing is over 24h old.");
-        }
     }
+
     private void DrawMaterials()
     {
         var list = Active;
@@ -766,7 +891,10 @@ public sealed class Plugin : IDalamudPlugin
                         ? "Price pending"
                         : quote.Covered
                             ? $"{quote.Cost:N0} g  |  {quote.WorldLabel}" +
-                              (quote.Exact ? "" : " *")
+                              (quote.Exact ? "" : " *") +
+                              (QuoteNeedsVerification(item, quote)
+                                  ? " !"
+                                  : "")
                             : "No complete offer";
 
                 string label =
@@ -1077,10 +1205,10 @@ public sealed class Plugin : IDalamudPlugin
 
                 ImGui.Separator();
 
-                ImGui.TextDisabled("MarketRun v0.1.0 DEV2");
+                ImGui.TextDisabled("MarketRun v0.1.0 DEV2 FIX1");
 
                 ImGui.TextDisabled(
-                    "Universalis integration begins in DEV2.");
+                    "World upload ages and listing prices are estimates.");
             }
 
             ImGui.End();

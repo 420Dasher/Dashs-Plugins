@@ -149,11 +149,11 @@
     "Name":  "MarketRun",
     "InternalName":  "MarketRun",
     "AssemblyVersion":  "0.0.0.0",
-    "TestingAssemblyVersion":  "0.1.0.4",
+    "TestingAssemblyVersion":  "0.1.0.5",
     "Description":  "Import materials, manage shopping lists and track required quantities. Universalis price optimization and guided purchasing are planned.",
     "Punchline":  "Plan your next Market Board run.",
     "Changelog":  "Initial testing build.",
-    "TestingChangelog":  "DEV2: Universalis DC-wide current listings, quantity-aware full-stack estimates, per-item recommended stacks, listing freshness and manual refresh.",
+    "TestingChangelog":  "DEV2 FIX1: Per-world Universalis upload freshness, older-data warnings, optional estimated 5% tax, manual refresh cooldown and clearer price labels.",
     "ApplicableVersion":  "any",
     "Tags":  [
                  "market board",

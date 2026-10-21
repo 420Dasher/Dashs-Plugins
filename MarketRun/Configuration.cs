@@ -8,6 +8,9 @@ public sealed class Configuration : IPluginConfiguration
 
     public string DataCenter { get; set; } = "Light";
 
+    // Estimated purchase tax, enabled by default.
+    public bool IncludePurchaseTax { get; set; } = true;
+
     public string ActiveListId { get; set; } = "";
 
     public List<ShoppingList> Lists { get; set; } = new();

@@ -7,6 +7,7 @@ namespace MarketRun;
 internal sealed class MarketOffer
 {
     public string World { get; init; } = "";
+    public int WorldId { get; init; }
     public string Retainer { get; init; } = "";
     public int Quantity { get; init; }
     public int PricePerUnit { get; init; }
@@ -22,6 +23,22 @@ internal sealed class MarketSnapshot
     public DateTime ReceivedUtc { get; init; }
     public long LastUploadMs { get; set; }
     public List<MarketOffer> Offers { get; } = new();
+
+    // Per-world, per-item upload timestamps in milliseconds.
+    // Do not replace these with the newest DC-wide upload.
+    public Dictionary<int, long> WorldUploadTimes { get; } = new();
+
+    public long UploadedAtSeconds(MarketOffer offer)
+    {
+        if (offer.WorldId <= 0)
+            return 0;
+
+        return WorldUploadTimes.TryGetValue(
+            offer.WorldId, out long milliseconds)
+            && milliseconds > 0
+                ? milliseconds / 1000
+                : 0;
+    }
 }
 
 internal sealed class MarketPricing : IDisposable
@@ -38,6 +55,7 @@ internal sealed class MarketPricing : IDisposable
     private int generation;
 
     private DateTime retryAfterUtc = DateTime.MinValue;
+    private DateTime nextManualRefreshUtc = DateTime.MinValue;
     private DateTime lastSuccessUtc = DateTime.MinValue;
 
     private static readonly TimeSpan CacheLifetime =
@@ -47,7 +65,7 @@ internal sealed class MarketPricing : IDisposable
     {
         http.Timeout = TimeSpan.FromSeconds(25);
         http.DefaultRequestHeaders.UserAgent.ParseAdd(
-            "MarketRun/0.1.0.4");
+            "MarketRun/0.1.0.5");
     }
 
     public bool IsLoading
@@ -94,9 +112,35 @@ internal sealed class MarketPricing : IDisposable
         Request(dc, itemIds, false);
     }
 
-    public void Refresh(string dc, IEnumerable<uint> itemIds)
+    public int ManualRefreshWaitSeconds
     {
+        get
+        {
+            lock (gate)
+            {
+                double seconds =
+                    (nextManualRefreshUtc - DateTime.UtcNow)
+                    .TotalSeconds;
+
+                return Math.Max(0, (int)Math.Ceiling(seconds));
+            }
+        }
+    }
+
+    public bool Refresh(string dc, IEnumerable<uint> itemIds)
+    {
+        lock (gate)
+        {
+            if (disposed || loading ||
+                DateTime.UtcNow < nextManualRefreshUtc)
+                return false;
+
+            nextManualRefreshUtc =
+                DateTime.UtcNow.AddSeconds(30);
+        }
+
         Request(dc, itemIds, true);
+        return true;
     }
 
     private void Request(
@@ -313,6 +357,31 @@ internal sealed class MarketPricing : IDisposable
 
         snapshot.LastUploadMs = Long(item, "lastUploadTime");
 
+        // Universalis DC responses provide the last upload
+        // separately for each world. Keys are world IDs.
+        if (item.TryGetProperty(
+                "worldUploadTimes", out var uploads) &&
+            uploads.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var world in uploads.EnumerateObject())
+            {
+                if (!int.TryParse(
+                    world.Name,
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out int worldId))
+                    continue;
+
+                if (world.Value.ValueKind ==
+                        JsonValueKind.Number &&
+                    world.Value.TryGetInt64(out long timestamp) &&
+                    timestamp > 0)
+                {
+                    snapshot.WorldUploadTimes[worldId] = timestamp;
+                }
+            }
+        }
+
         if (!item.TryGetProperty("listings", out var listings) ||
             listings.ValueKind != JsonValueKind.Array)
             return;
@@ -347,6 +416,7 @@ internal sealed class MarketPricing : IDisposable
             snapshot.Offers.Add(new MarketOffer
             {
                 World = world,
+                WorldId = Int(entry, "worldID"),
                 Retainer = Str(entry, "retainerName"),
                 Quantity = quantity,
                 PricePerUnit = unitPrice,
@@ -400,6 +470,19 @@ internal sealed class PurchasePlan
 
 internal static class PriceOptimizer
 {
+    public static long ListingCost(
+        MarketOffer offer,
+        bool includeTax)
+    {
+        long baseCost = offer.Total;
+
+        // Approximate 5% purchase fee, rounded down
+        // per complete Market Board listing.
+        return includeTax
+            ? baseCost + baseCost / 20
+            : baseCost;
+    }
+
     // Exact optimization for ordinary shopping quantities.
     // Larger cases use a labeled heuristic to avoid
     // excessive CPU and memory use on Dalamud's UI thread.
@@ -409,7 +492,8 @@ internal static class PriceOptimizer
     public static PurchasePlan Calculate(
         IEnumerable<MarketOffer> offers,
         int needed,
-        int quality)
+        int quality,
+        bool includeTax)
     {
         if (needed <= 0)
         {
@@ -446,14 +530,15 @@ internal static class PriceOptimizer
 
         if (needed <= ExactQuantityLimit &&
             eligible.Count <= ExactListingLimit)
-            return Exact(eligible, needed);
+            return Exact(eligible, needed, includeTax);
 
-        return Heuristic(eligible, needed);
+        return Heuristic(eligible, needed, includeTax);
     }
 
     private static PurchasePlan Exact(
         List<MarketOffer> offers,
-        int needed)
+        int needed,
+        bool includeTax)
     {
         const long Infinity = long.MaxValue / 4;
 
@@ -481,7 +566,8 @@ internal static class PriceOptimizer
                     (long)needed,
                     (long)quantity + offer.Quantity);
 
-                long candidate = costs[quantity] + offer.Total;
+                long candidate = costs[quantity] +
+                    ListingCost(offer, includeTax);
 
                 if (candidate >= next[destination])
                     continue;
@@ -536,7 +622,8 @@ internal static class PriceOptimizer
 
     private static PurchasePlan Heuristic(
         List<MarketOffer> offers,
-        int needed)
+        int needed,
+        bool includeTax)
     {
         var candidates = new[]
         {
@@ -564,7 +651,7 @@ internal static class PriceOptimizer
                     break;
 
                 units += offer.Quantity;
-                cost += offer.Total;
+                cost += ListingCost(offer, includeTax);
                 chosen.Add(offer);
             }
 
