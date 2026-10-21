@@ -36,6 +36,8 @@ public sealed class Plugin : IDalamudPlugin
     private bool settingsOpen;
     private bool confirmDelete;
     private bool replaceList;
+    private bool showTextEditor;
+    private string selectedItemKey = "";
 
     private string importText = "";
     private string importStatus = "";
@@ -82,7 +84,7 @@ public sealed class Plugin : IDalamudPlugin
         Pi.UiBuilder.OpenMainUi += Open;
         Pi.UiBuilder.OpenConfigUi += OpenSettings;
 
-        Log.Information("MarketRun v0.1.0 DEV1 initialized.");
+        Log.Information("MarketRun v0.1.0 DEV1 FIX1 initialized.");
     }
 
     private void Save() => Pi.SavePluginConfig(cfg);
@@ -97,7 +99,7 @@ public sealed class Plugin : IDalamudPlugin
             "settings", StringComparison.OrdinalIgnoreCase))
             settingsOpen = true;
         else
-            mainOpen = true;
+            mainOpen = !mainOpen;
     }
 
     public void Dispose()
@@ -132,7 +134,7 @@ public sealed class Plugin : IDalamudPlugin
         try
         {
             ImGui.SetNextWindowSize(
-                new Vector2(500f, 470f),
+                new Vector2(505f, 435f),
                 ImGuiCond.FirstUseEver);
 
             bool open = mainOpen;
@@ -148,8 +150,23 @@ public sealed class Plugin : IDalamudPlugin
             {
                 DrawHeader();
                 DrawLists();
-                DrawMaterials();
-                DrawImport();
+
+                if (ImGui.BeginTabBar("##MarketRunTabs"))
+                {
+                    if (ImGui.BeginTabItem("Shopping List"))
+                    {
+                        DrawMaterials();
+                        ImGui.EndTabItem();
+                    }
+
+                    if (ImGui.BeginTabItem("Import"))
+                    {
+                        DrawImport();
+                        ImGui.EndTabItem();
+                    }
+
+                    ImGui.EndTabBar();
+                }
             }
 
             ImGui.End();
@@ -165,7 +182,7 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.TextColored(Theme.Get(cfg, 4), "MARKET RUN");
 
         ImGui.SameLine();
-        ImGui.TextDisabled("v0.1.0 DEV1");
+        ImGui.TextDisabled("v0.1.0 DEV1 FIX1");
 
         ImGui.SameLine(
             MathF.Max(280f, ImGui.GetWindowWidth() - 91f));
@@ -200,8 +217,7 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.EndCombo();
         }
 
-        ImGui.SameLine();
-        ImGui.TextDisabled("Prices available in DEV2");
+        // Pricing controls will occupy this space in DEV2.
     }
 
     private void DrawLists()
@@ -301,168 +317,222 @@ public sealed class Plugin : IDalamudPlugin
 
     private void DrawMaterials()
     {
-        ImGui.Spacing();
-        ImGui.Separator();
-
         var list = Active;
 
         int completed = list.Items.Count(x =>
             x.Acquired >= x.Quantity);
 
-        ImGui.TextColored(
-            Theme.Get(cfg, 4),
-            "MATERIALS");
+        ImGui.Spacing();
 
+        ImGui.TextColored(Theme.Get(cfg, 4), "MATERIALS");
         ImGui.SameLine();
-
         ImGui.TextDisabled(
             $"{completed} / {list.Items.Count} complete");
+
+        ImGui.Separator();
 
         if (list.Items.Count == 0)
         {
             ImGui.Spacing();
             ImGui.TextDisabled("No materials imported yet.");
-            ImGui.Spacing();
+            ImGui.TextDisabled(
+                "Open the Import tab to add materials.");
             return;
         }
 
+        // Only one selected item exposes editing controls.
+        // All other items remain compact single-line entries.
         if (ImGui.BeginChild(
-            "##MarketRunItems",
-            new Vector2(0f, 190f),
+            "##MarketRunCompactItems",
+            new Vector2(0f, 215f),
             true))
         {
-            ShoppingItem? remove = null;
-
             foreach (var item in list.Items)
             {
-                ImGui.PushID(
-                    $"{item.ItemId}-{item.Quality}");
+                string key = $"{item.ItemId}-{item.Quality}";
 
-                try
+                bool done = item.Acquired >= item.Quantity;
+                int remaining = Math.Max(
+                    0, item.Quantity - item.Acquired);
+
+                string quality = item.Quality switch
                 {
-                    bool done = item.Acquired >= item.Quantity;
+                    2 => " [HQ]",
+                    1 => " [NQ]",
+                    _ => ""
+                };
 
-                    ImGui.TextColored(
-                        done ? Theme.Get(cfg, 5)
-                             : Theme.Get(cfg, 2),
-                        item.Name);
+                string row =
+                    $"{(done ? "[x]" : "[ ]")} " +
+                    $"{item.Name}{quality}  " +
+                    $"{remaining:N0} left";
 
-                    if (item.Quality != 0)
-                    {
-                        ImGui.SameLine();
+                bool selected = selectedItemKey == key;
 
-                        ImGui.TextDisabled(
-                            item.Quality == 2 ? "[HQ]" : "[NQ]");
-                    }
-
-                    ImGui.TextDisabled(
-                        $"{item.Acquired:N0} / {item.Quantity:N0}");
-
-                    if (ImGui.SmallButton("-"))
-                    {
-                        item.Acquired = Math.Max(
-                            0, item.Acquired - 1);
-
-                        Save();
-                    }
-
-                    ImGui.SameLine();
-
-                    if (ImGui.SmallButton("+"))
-                    {
-                        item.Acquired = Math.Min(
-                            item.Quantity,
-                            item.Acquired + 1);
-
-                        Save();
-                    }
-
-                    ImGui.SameLine();
-
-                    if (ImGui.SmallButton(
-                        done ? "Reset" : "Complete"))
-                    {
-                        item.Acquired = done ? 0 : item.Quantity;
-                        Save();
-                    }
-
-                    ImGui.SameLine();
-
-                    if (ImGui.SmallButton("Remove"))
-                        remove = item;
-
-                    int amount = item.Quantity;
-
-                    ImGui.SetNextItemWidth(105f);
-
-                    if (ImGui.InputInt(
-                        "Needed", ref amount, 0, 0))
-                    {
-                        item.Quantity = Math.Clamp(
-                            amount, 1, 999999);
-
-                        item.Acquired = Math.Min(
-                            item.Acquired, item.Quantity);
-
-                        Save();
-                    }
-
-                    ImGui.Separator();
-                }
-                finally
-                {
-                    ImGui.PopID();
-                }
-            }
-
-            if (remove != null)
-            {
-                list.Items.Remove(remove);
-                Save();
+                if (ImGui.Selectable(
+                    row + "##" + key, selected))
+                    selectedItemKey = key;
             }
         }
 
         ImGui.EndChild();
+
+        var selectedItem = list.Items.FirstOrDefault(
+            x => $"{x.ItemId}-{x.Quality}" == selectedItemKey);
+
+        if (selectedItem == null)
+        {
+            selectedItem = list.Items.FirstOrDefault(
+                x => x.Acquired < x.Quantity)
+                ?? list.Items[0];
+
+            selectedItemKey =
+                $"{selectedItem.ItemId}-{selectedItem.Quality}";
+        }
+
+        ImGui.Spacing();
+
+        ImGui.TextColored(
+            Theme.Get(cfg, 4),
+            "SELECTED MATERIAL");
+
+        ImGui.TextWrapped(selectedItem.Name);
+
+        int needed = selectedItem.Quantity;
+        int acquired = selectedItem.Acquired;
+
+        ImGui.SetNextItemWidth(92f);
+
+        if (ImGui.InputInt(
+            "Needed##Selected", ref needed, 0, 0))
+        {
+            selectedItem.Quantity =
+                Math.Clamp(needed, 1, 999999);
+
+            selectedItem.Acquired = Math.Min(
+                selectedItem.Acquired, selectedItem.Quantity);
+
+            Save();
+        }
+
+        ImGui.SameLine();
+
+        ImGui.SetNextItemWidth(92f);
+
+        if (ImGui.InputInt(
+            "Acquired##Selected", ref acquired, 0, 0))
+        {
+            selectedItem.Acquired = Math.Clamp(
+                acquired, 0, selectedItem.Quantity);
+
+            Save();
+        }
+
+        bool doneNow =
+            selectedItem.Acquired >= selectedItem.Quantity;
+
+        if (ImGui.Button(doneNow ? "Reset" : "Complete"))
+        {
+            selectedItem.Acquired =
+                doneNow ? 0 : selectedItem.Quantity;
+
+            Save();
+        }
+
+        ImGui.SameLine();
+
+        if (ImGui.Button("Remove selected"))
+        {
+            list.Items.Remove(selectedItem);
+            selectedItemKey = "";
+            Save();
+        }
     }
 
     private void DrawImport()
     {
         ImGui.Spacing();
 
-        if (!ImGui.CollapsingHeader(
-            "IMPORT MATERIALS",
-            ImGuiTreeNodeFlags.DefaultOpen))
-            return;
+        ImGui.TextColored(
+            Theme.Get(cfg, 4),
+            "IMPORT MATERIALS");
 
         ImGui.TextDisabled(
-            "Paste material text, CSV/TSV or simple item JSON.");
+            "Copy a material list, then import it here.");
 
-        ImGui.TextDisabled(
-            "Examples: 10x Copper Ore | Copper Ore: 10");
-
-        ImGui.InputTextMultiline(
-            "##ImportText",
-            ref importText,
-            100000,
-            new Vector2(-1f, 115f));
-
-        if (ImGui.Button("Preview import"))
+        if (ImGui.Button("Import from Clipboard"))
         {
-            preview = importer.Parse(importText);
+            try
+            {
+                string clipboard = ImGui.GetClipboardText();
 
-            importStatus = preview.Count == 0
-                ? "No materials found."
-                : "";
+                if (string.IsNullOrWhiteSpace(clipboard))
+                {
+                    importStatus = "Clipboard is empty or contains no text.";
+                    preview.Clear();
+                }
+                else if (clipboard.Length > 100000)
+                {
+                    importStatus =
+                        "Clipboard text is too long (maximum 100,000 characters).";
+                    preview.Clear();
+                }
+                else
+                {
+                    importText = clipboard;
+                    preview = importer.Parse(importText);
+                    showTextEditor = false;
+
+                    importStatus = preview.Count == 0
+                        ? "No materials detected in clipboard."
+                        : "";
+                }
+            }
+            catch (Exception ex)
+            {
+                preview.Clear();
+                importStatus =
+                    "Could not read clipboard: " + ex.Message;
+            }
         }
 
         ImGui.SameLine();
 
-        if (ImGui.Button("Clear"))
+        if (ImGui.Button(
+            showTextEditor ? "Hide text editor" : "Edit text"))
+        {
+            showTextEditor = !showTextEditor;
+        }
+
+        ImGui.SameLine();
+
+        if (ImGui.SmallButton("Clear"))
         {
             importText = "";
             preview.Clear();
             importStatus = "";
         }
+
+        if (showTextEditor)
+        {
+            ImGui.Spacing();
+
+            ImGui.InputTextMultiline(
+                "##MarketRunImportText",
+                ref importText,
+                100000,
+                new Vector2(-1f, 115f));
+
+            if (ImGui.Button("Preview edited text"))
+            {
+                preview = importer.Parse(importText);
+                importStatus = preview.Count == 0
+                    ? "No materials found."
+                    : "";
+            }
+        }
+
+        ImGui.Spacing();
 
         ImGui.Checkbox(
             "Replace existing materials",
@@ -483,8 +553,8 @@ public sealed class Plugin : IDalamudPlugin
                 $"{valid} recognized / {invalid} unresolved");
 
             if (ImGui.BeginChild(
-                "##ImportPreview",
-                new Vector2(0f, 125f),
+                "##MarketRunImportPreview",
+                new Vector2(0f, 195f),
                 true))
             {
                 foreach (var row in preview)
@@ -518,18 +588,23 @@ public sealed class Plugin : IDalamudPlugin
             if (invalid > 0)
             {
                 ImGui.TextWrapped(
-                    "Resolve all unrecognized entries before importing. " +
-                    "No partial imports will be performed.");
+                    "Some entries could not be recognized. " +
+                    "Use Edit text to correct them before importing.");
             }
             else if (valid > 0)
             {
-                if (ImGui.Button($"Import {valid} entries"))
+                if (ImGui.Button($"Confirm import ({valid} entries)"))
+                {
                     ApplyImport();
+                }
             }
         }
 
         if (importStatus.Length > 0)
+        {
+            ImGui.Spacing();
             ImGui.TextWrapped(importStatus);
+        }
     }
 
     private void ApplyImport()
@@ -612,7 +687,7 @@ public sealed class Plugin : IDalamudPlugin
         try
         {
             ImGui.SetNextWindowSize(
-                new Vector2(410f, 225f),
+                new Vector2(410f, 285f),
                 ImGuiCond.FirstUseEver);
 
             bool open = settingsOpen;
@@ -660,7 +735,7 @@ public sealed class Plugin : IDalamudPlugin
 
                 ImGui.Separator();
 
-                ImGui.TextDisabled("MarketRun v0.1.0 DEV1");
+                ImGui.TextDisabled("MarketRun v0.1.0 DEV1 FIX1");
 
                 ImGui.TextDisabled(
                     "Universalis integration begins in DEV2.");

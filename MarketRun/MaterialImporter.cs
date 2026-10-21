@@ -183,14 +183,26 @@ internal sealed class MaterialImporter
     {
         string text = original.Trim();
 
+        // Remove common copied-list bullets and numbering.
         text = Regex.Replace(
             text,
-            @"^\s*[-•]\s+",
+            @"^\s*(?:[-•]\s+|\d+\.\s+)",
             "");
 
-        foreach (var pattern in Patterns)
+        // Accept quantity-first and quantity-last formats,
+        // including optional trailing x and separators.
+        var patterns = new[]
         {
-            var match = pattern.Match(text);
+            @"^(?<qty>\d{1,7})\s*(?:[xX×*]\s*|\s+|[,;\t]\s*)(?<name>.+)$",
+            @"^(?<name>.+?)\s*(?:[,;:\t]\s*|\s+[xX×*]\s*|\s+)(?<qty>\d{1,7})\s*[xX×*]?$"
+        };
+
+        ImportRow? firstError = null;
+
+        foreach (string pattern in patterns)
+        {
+            var match = Regex.Match(
+                text, pattern, RegexOptions.IgnoreCase);
 
             if (!match.Success)
                 continue;
@@ -203,29 +215,48 @@ internal sealed class MaterialImporter
                 continue;
 
             string name = Clean(match.Groups["name"].Value);
-
             int quality = 0;
 
-            var qualityMatch = Regex.Match(
+            // HQ/NQ may appear before or after the name.
+            var prefix = Regex.Match(
                 name,
-                @"\s*[\[(](HQ|NQ)[\])]\s*$",
+                @"^\s*[\[(]\s*(HQ|NQ)\s*[\])]\s*",
                 RegexOptions.IgnoreCase);
 
-            if (qualityMatch.Success)
+            if (prefix.Success)
             {
-                quality = qualityMatch.Groups[1].Value
-                    .Equals("HQ", StringComparison.OrdinalIgnoreCase)
+                quality = prefix.Groups[1].Value.Equals(
+                    "HQ", StringComparison.OrdinalIgnoreCase)
+                    ? 2 : 1;
+
+                name = name.Substring(prefix.Length).Trim();
+            }
+
+            var suffix = Regex.Match(
+                name,
+                @"\s*[\[(]\s*(HQ|NQ)\s*[\])]\s*$",
+                RegexOptions.IgnoreCase);
+
+            if (suffix.Success)
+            {
+                quality = suffix.Groups[1].Value.Equals(
+                    "HQ", StringComparison.OrdinalIgnoreCase)
                     ? 2 : 1;
 
                 name = name.Substring(
-                    0, qualityMatch.Index).Trim();
+                    0, suffix.Index).Trim();
             }
 
-            return ResolveRow(
+            var resolved = ResolveRow(
                 name, quantity, quality, line, original);
+
+            if (resolved.Valid)
+                return resolved;
+
+            firstError ??= resolved;
         }
 
-        return new ImportRow
+        return firstError ?? new ImportRow
         {
             Line = line,
             Original = original,
