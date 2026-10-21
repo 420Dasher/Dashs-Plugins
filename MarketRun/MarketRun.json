@@ -1,0 +1,21 @@
+{
+  "Author": "Dash + AI",
+  "Name": "MarketRun",
+  "InternalName": "MarketRun",
+  "AssemblyVersion": "0.1.0.1",
+  "DalamudApiLevel": 15,
+  "ApplicableVersion": "any",
+  "LoadRequiredState": 0,
+  "LoadSync": false,
+  "CanUnloadAsync": false,
+  "LoadPriority": 0,
+  "Punchline": "Plan your next Market Board run.",
+  "Description": "Import material lists, manage required quantities and track shopping progress. Data-center price comparisons and guided purchasing will follow in later development versions.",
+  "Tags": [
+    "market board",
+    "shopping",
+    "crafting",
+    "materials",
+    "utility"
+  ]
+}
