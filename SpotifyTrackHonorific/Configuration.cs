@@ -13,7 +13,7 @@ public sealed class Configuration : IPluginConfiguration
     public const string DefaultContentFilterFallback = "Triggerword censored";
     public const int MaxTitleProfiles = 5;
 
-    public int Version { get; set; } = 14;
+    public int Version { get; set; } = 15;
 
     public bool Enabled { get; set; } = true;
     public bool ShowNormalTracks { get; set; } = true;
@@ -35,6 +35,20 @@ public sealed class Configuration : IPluginConfiguration
     // replaced it. This is intentionally not part of saved profiles or portable
     // settings because it belongs to the current character/Honorific context.
     public string CachedHonorificTitle { get; set; } = string.Empty;
+
+    // v15 optional Character Select+ / underlying Honorific style matching.
+    // Manual STH appearance remains the fallback when this is disabled or no
+    // underlying style has been captured for the current character yet.
+    public bool MatchCharacterSelectHonorificStyle { get; set; } = false;
+
+    // Character-local style snapshot paired with CachedHonorificTitle.
+    // These fields deliberately stay outside saved profiles and portable settings.
+    public bool CachedHonorificStyleCaptured { get; set; } = false;
+    public Vector3? CachedHonorificColor { get; set; }
+    public Vector3? CachedHonorificGlow { get; set; }
+    public Vector3? CachedHonorificColor3 { get; set; }
+    public int? CachedHonorificGradientColourSet { get; set; }
+    public int? CachedHonorificGradientAnimationStyle { get; set; }
 
     // v3 title-cleanup/presentation options.
     public bool StripBracketedTrackParts { get; set; } = false;
@@ -216,6 +230,21 @@ public sealed class Configuration : IPluginConfiguration
             // comparison. Start empty and let Plugin reconcile it from saved profiles.
             ActiveTitleProfileName = string.Empty;
             Version = 14;
+            changed = true;
+        }
+
+        if (Version < 15)
+        {
+            // Preserve existing STH appearance for upgraded users until they
+            // explicitly opt into Character Select+ style matching.
+            MatchCharacterSelectHonorificStyle = false;
+            CachedHonorificStyleCaptured = false;
+            CachedHonorificColor = null;
+            CachedHonorificGlow = null;
+            CachedHonorificColor3 = null;
+            CachedHonorificGradientColourSet = null;
+            CachedHonorificGradientAnimationStyle = null;
+            Version = 15;
             changed = true;
         }
 

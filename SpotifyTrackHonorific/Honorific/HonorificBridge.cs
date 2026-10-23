@@ -7,6 +7,17 @@ using System.Numerics;
 
 namespace SpotifyTrackHonorific.Honorific;
 
+internal sealed class HonorificTitleState
+{
+    public string Title { get; init; } = string.Empty;
+    public bool IsPrefix { get; init; }
+    public Vector3? Color { get; init; }
+    public Vector3? Glow { get; init; }
+    public Vector3? Color3 { get; init; }
+    public int? GradientColourSet { get; init; }
+    public int? GradientAnimationStyle { get; init; }
+}
+
 internal sealed class HonorificBridge : IDisposable
 {
     // Honorific currently enforces a 32-character title limit.
@@ -108,6 +119,17 @@ internal sealed class HonorificBridge : IDisposable
     {
         title = string.Empty;
 
+        if (!TryGetCurrentTitleState(out var state))
+            return false;
+
+        title = state.Title;
+        return true;
+    }
+
+    public bool TryGetCurrentTitleState(out HonorificTitleState state)
+    {
+        state = new HonorificTitleState();
+
         var rawJson = getTitle.InvokeFunc(0);
         if (string.IsNullOrWhiteSpace(rawJson))
             return false;
@@ -115,7 +137,9 @@ internal sealed class HonorificBridge : IDisposable
         try
         {
             using var document = JsonDocument.Parse(rawJson);
-            if (!document.RootElement.TryGetProperty("Title", out var titleElement) ||
+            var root = document.RootElement;
+
+            if (!root.TryGetProperty("Title", out var titleElement) ||
                 titleElement.ValueKind != JsonValueKind.String)
                 return false;
 
@@ -123,13 +147,96 @@ internal sealed class HonorificBridge : IDisposable
             if (string.IsNullOrWhiteSpace(currentTitle))
                 return false;
 
-            title = currentTitle.Trim();
+            var isPrefix =
+                root.TryGetProperty("IsPrefix", out var prefixElement) &&
+                prefixElement.ValueKind == JsonValueKind.True;
+
+            state = new HonorificTitleState
+            {
+                Title = currentTitle.Trim(),
+                IsPrefix = isPrefix,
+                Color = ReadVector3(root, "Color"),
+                Glow = ReadVector3(root, "Glow"),
+                Color3 = ReadVector3(root, "Color3"),
+                GradientColourSet = ReadNullableInt(root, "GradientColourSet"),
+                GradientAnimationStyle = ReadNullableInt(root, "GradientAnimationStyle")
+            };
+
             return true;
         }
         catch (JsonException)
         {
             return false;
         }
+    }
+
+    private static Vector3? ReadVector3(
+        JsonElement root,
+        string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var element) ||
+            element.ValueKind == JsonValueKind.Null ||
+            element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (!TryReadFloat(element, "X", out var x) ||
+            !TryReadFloat(element, "Y", out var y) ||
+            !TryReadFloat(element, "Z", out var z))
+        {
+            return null;
+        }
+
+        return new Vector3(x, y, z);
+    }
+
+    private static bool TryReadFloat(
+        JsonElement element,
+        string propertyName,
+        out float value)
+    {
+        value = 0f;
+
+        return element.TryGetProperty(propertyName, out var component) &&
+               component.ValueKind == JsonValueKind.Number &&
+               component.TryGetSingle(out value);
+    }
+
+    private static int? ReadNullableInt(
+        JsonElement root,
+        string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var element) ||
+            element.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (element.ValueKind == JsonValueKind.Number &&
+            element.TryGetInt32(out var numeric))
+        {
+            return numeric;
+        }
+
+        if (element.ValueKind != JsonValueKind.String)
+            return null;
+
+        var raw = element.GetString()?.Trim();
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        if (int.TryParse(raw, out numeric))
+            return numeric;
+
+        // Honorific currently defines Pulse=0, Wave=1, Static=2.
+        return raw.ToLowerInvariant() switch
+        {
+            "pulse" => 0,
+            "wave" => 1,
+            "static" => 2,
+            _ => null
+        };
     }
 
     public static string FitTitle(string title, bool smartFit = false)
