@@ -1,5 +1,5 @@
 # Changelog
-## 1.0.19 DEV1 - Theme and Character Style Matching
+## 1.0.19 - Theme and Character Style Matching
 
 - STH's custom header accent now follows the active Dalamud theme automatically while the rest of the interface continues using native Dalamud styling.
 - Adds optional Character Select+ Honorific style matching.
