@@ -1,4 +1,12 @@
 # Changelog
+## 1.0.19 DEV1 - Theme and Character Style Matching
+
+- STH's custom header accent now follows the active Dalamud theme automatically while the rest of the interface continues using native Dalamud styling.
+- Adds optional Character Select+ Honorific style matching.
+- Captures the underlying Honorific text color, glow, third color, gradient preset, and animation after Character Select+ hand-offs.
+- Detects style-only Character Select+ changes even when two profiles use the same Honorific title text.
+- Manual STH appearance settings remain the fallback when matching is disabled or no current-character style has been captured.
+- Character-local Honorific style data stays outside saved title profiles and portable settings.
 ## 1.0.18 - Retained Title Recovery
 
 - Keeps the previous safe Spotify title recoverable when the content filter is set to Keep previous title.

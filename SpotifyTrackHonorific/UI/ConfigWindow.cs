@@ -102,11 +102,16 @@ internal sealed class ConfigWindow : Window
 
         ImGui.PopStyleVar(3);
     }
+    private static unsafe Vector4 GetDalamudAccentColor() =>
+        *ImGui.GetStyleColorVec4(ImGuiCol.CheckMark);
+
     private void DrawHeader()
     {
         var config = plugin.Config;
 
-        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.40f, 0.88f, 0.68f, 1f));
+        ImGui.PushStyleColor(
+            ImGuiCol.Text,
+            GetDalamudAccentColor());
         ImGui.TextUnformatted("SpotifyTrackHonorific");
         ImGui.PopStyleColor();
 
@@ -1560,6 +1565,34 @@ internal sealed class ConfigWindow : Window
     private void DrawAppearanceTab()
     {
         var config = plugin.Config;
+
+        DrawSectionHeader(
+            "Automatic appearance",
+            "STH can reuse the Honorific style applied when Character Select+ changes your character or profile.");
+
+        var matchCharacterSelectStyle =
+            config.MatchCharacterSelectHonorificStyle;
+
+        if (ImGui.Checkbox(
+            "Match Character Select+ Honorific style",
+            ref matchCharacterSelectStyle))
+        {
+            config.MatchCharacterSelectHonorificStyle =
+                matchCharacterSelectStyle;
+
+            plugin.SettingsChanged();
+        }
+
+        if (config.MatchCharacterSelectHonorificStyle)
+        {
+            ImGui.TextDisabled(
+                config.CachedHonorificStyleCaptured
+                    ? "Captured style available for the current character. Text color, glow, gradient, and animation will be reused."
+                    : "No underlying style captured yet. Switch Character Select+ profile/character once, or cache the current Honorific title.");
+
+            ImGui.TextDisabled(
+                "Manual appearance settings below remain the fallback if no captured style is available.");
+        }
 
         DrawSectionHeader(
             "Standard appearance",

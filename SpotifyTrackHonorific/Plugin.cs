@@ -15,6 +15,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Numerics;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,7 +24,7 @@ namespace SpotifyTrackHonorific;
 
 public sealed class Plugin : IDalamudPlugin
 {
-    internal const string DisplayVersion = "1.0.18";
+    internal const string DisplayVersion = "1.0.19-dev1";
     private const string ShortCommand = "/sth";
     private const string LongCommand = "/spotifytrackhonorific";
     private static readonly TimeSpan NormalPollInterval = TimeSpan.FromSeconds(15);
@@ -108,6 +109,7 @@ public sealed class Plugin : IDalamudPlugin
     private long pendingCharacterSelectCaptureUtcTicks;
     private long characterSelectCaptureDeadlineUtcTicks;
     private string characterSelectPreviousHonorificTitle = string.Empty;
+    private string characterSelectPreviousHonorificStyleFingerprint = string.Empty;
     private bool characterSelectRecaptureActive;
     private int characterSelectEventCount;
     private int characterSelectPollChangeCount;
@@ -449,6 +451,8 @@ public sealed class Plugin : IDalamudPlugin
             $"Auto-hide in combat: {config.AutoHideInCombat}",
             $"Currently in combat: {Condition[ConditionFlag.InCombat]}",
             $"Cached original Honorific title: {!string.IsNullOrWhiteSpace(config.CachedHonorificTitle)}",
+            $"Match Character Select+ Honorific style: {config.MatchCharacterSelectHonorificStyle}",
+            $"Cached underlying Honorific style: {config.CachedHonorificStyleCaptured}",
             $"PatMeHonorific support: {config.EnablePatMeHonorificSupport}",
             $"Yielding to temporary Honorific title: {patMeHonorificOverrideActive}",
             $"Smart-fit long titles: {config.SmartFitLongTitles}",
@@ -772,15 +776,89 @@ public sealed class Plugin : IDalamudPlugin
         message = $"Moved profile '{profile.Name}' {(direction < 0 ? "up" : "down")}.";
         return true;
     }
+    private static string FormatStyleVector(Vector3? value)
+    {
+        if (!value.HasValue)
+            return "null";
+
+        var v = value.Value;
+
+        return $"{v.X:F4},{v.Y:F4},{v.Z:F4}";
+    }
+
+    private static string BuildHonorificStyleFingerprint(
+        HonorificTitleState state) =>
+        $"color:{FormatStyleVector(state.Color)}" +
+        $"|glow:{FormatStyleVector(state.Glow)}" +
+        $"|color3:{FormatStyleVector(state.Color3)}" +
+        $"|gradient:{state.GradientColourSet?.ToString() ?? "null"}" +
+        $"|animation:{state.GradientAnimationStyle?.ToString() ?? "null"}";
+
+    private string BuildCachedHonorificStyleFingerprint()
+    {
+        if (!config.CachedHonorificStyleCaptured)
+            return "none";
+
+        return
+            $"color:{FormatStyleVector(config.CachedHonorificColor)}" +
+            $"|glow:{FormatStyleVector(config.CachedHonorificGlow)}" +
+            $"|color3:{FormatStyleVector(config.CachedHonorificColor3)}" +
+            $"|gradient:{config.CachedHonorificGradientColourSet?.ToString() ?? "null"}" +
+            $"|animation:{config.CachedHonorificGradientAnimationStyle?.ToString() ?? "null"}";
+    }
+
+    private bool CacheHonorificStyle(HonorificTitleState state)
+    {
+        var changed =
+            !config.CachedHonorificStyleCaptured ||
+            !Nullable.Equals(config.CachedHonorificColor, state.Color) ||
+            !Nullable.Equals(config.CachedHonorificGlow, state.Glow) ||
+            !Nullable.Equals(config.CachedHonorificColor3, state.Color3) ||
+            config.CachedHonorificGradientColourSet != state.GradientColourSet ||
+            config.CachedHonorificGradientAnimationStyle != state.GradientAnimationStyle;
+
+        config.CachedHonorificStyleCaptured = true;
+        config.CachedHonorificColor = state.Color;
+        config.CachedHonorificGlow = state.Glow;
+        config.CachedHonorificColor3 = state.Color3;
+        config.CachedHonorificGradientColourSet = state.GradientColourSet;
+        config.CachedHonorificGradientAnimationStyle =
+            state.GradientAnimationStyle;
+
+        return changed;
+    }
+
+    private bool ClearCachedHonorificStyle()
+    {
+        var changed =
+            config.CachedHonorificStyleCaptured ||
+            config.CachedHonorificColor.HasValue ||
+            config.CachedHonorificGlow.HasValue ||
+            config.CachedHonorificColor3.HasValue ||
+            config.CachedHonorificGradientColourSet.HasValue ||
+            config.CachedHonorificGradientAnimationStyle.HasValue;
+
+        config.CachedHonorificStyleCaptured = false;
+        config.CachedHonorificColor = null;
+        config.CachedHonorificGlow = null;
+        config.CachedHonorificColor3 = null;
+        config.CachedHonorificGradientColourSet = null;
+        config.CachedHonorificGradientAnimationStyle = null;
+
+        return changed;
+    }
+
     internal bool CacheCurrentHonorificTitle(out string message)
     {
         try
         {
-            if (!honorific.TryGetCurrentTitle(out var currentTitle))
+            if (!honorific.TryGetCurrentTitleState(out var currentState))
             {
                 message = "Honorific has no current title to cache.";
                 return false;
             }
+
+            var currentTitle = currentState.Title;
 
             if (hasAppliedTitle &&
                 !string.IsNullOrWhiteSpace(lastAppliedTitle) &&
@@ -791,9 +869,10 @@ public sealed class Plugin : IDalamudPlugin
             }
 
             config.CachedHonorificTitle = currentTitle;
+            CacheHonorificStyle(currentState);
             originalHonorificCaptureFinished = true;
             SettingsChanged();
-            message = $"Cached Honorific title: {currentTitle}";
+            message = $"Cached Honorific title and style: {currentTitle}";
             return true;
         }
         catch (Exception ex)
@@ -807,6 +886,7 @@ public sealed class Plugin : IDalamudPlugin
     internal void ClearCachedHonorificTitle(out string message)
     {
         config.CachedHonorificTitle = string.Empty;
+        ClearCachedHonorificStyle();
 
         // If STH currently owns the visible title, keep auto-capture blocked so
         // we cannot immediately cache our own Spotify output. Once STH has been
@@ -934,6 +1014,8 @@ public sealed class Plugin : IDalamudPlugin
         config.ShowLocalTracks = defaults.ShowLocalTracks;
         config.ClearOnPause = defaults.ClearOnPause;
         config.AutoHideInCombat = defaults.AutoHideInCombat;
+        config.MatchCharacterSelectHonorificStyle =
+            defaults.MatchCharacterSelectHonorificStyle;
         config.IsPrefix = defaults.IsPrefix;
         config.TitleFormat = defaults.TitleFormat;
         config.StripBracketedTrackParts = defaults.StripBracketedTrackParts;
@@ -1061,9 +1143,11 @@ public sealed class Plugin : IDalamudPlugin
 
         // The cached normal Honorific title belongs to the selected character.
         // Drop the previous character's cache and recapture before STH writes.
-        if (!string.IsNullOrWhiteSpace(config.CachedHonorificTitle))
+        if (!string.IsNullOrWhiteSpace(config.CachedHonorificTitle) ||
+            config.CachedHonorificStyleCaptured)
         {
             config.CachedHonorificTitle = string.Empty;
+            ClearCachedHonorificStyle();
             SaveConfig();
         }
 
@@ -1104,6 +1188,7 @@ public sealed class Plugin : IDalamudPlugin
         Interlocked.Exchange(ref pendingCharacterSelectCaptureUtcTicks, 0);
         Interlocked.Exchange(ref characterSelectCaptureDeadlineUtcTicks, 0);
         characterSelectPreviousHonorificTitle = string.Empty;
+        characterSelectPreviousHonorificStyleFingerprint = string.Empty;
         characterSelectRecaptureActive = false;
         characterSelectEventCount = 0;
         characterSelectPollChangeCount = 0;
@@ -1392,7 +1477,12 @@ public sealed class Plugin : IDalamudPlugin
     {
         var now = DateTimeOffset.UtcNow;
 
-        characterSelectPreviousHonorificTitle = config.CachedHonorificTitle ?? string.Empty;
+        characterSelectPreviousHonorificTitle =
+            config.CachedHonorificTitle ?? string.Empty;
+
+        characterSelectPreviousHonorificStyleFingerprint =
+            BuildCachedHonorificStyleFingerprint();
+
         characterSelectRecaptureActive = true;
         appliedFingerprint = null;
 
@@ -1404,6 +1494,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             characterSelectRecaptureActive = false;
             characterSelectPreviousHonorificTitle = string.Empty;
+            characterSelectPreviousHonorificStyleFingerprint = string.Empty;
             Log.Warning("Character Select+ compatibility: could not relinquish STH Honorific title.");
             return;
         }
@@ -1552,20 +1643,37 @@ public sealed class Plugin : IDalamudPlugin
 
         try
         {
-            var hasUnderlyingTitle = honorific.TryGetCurrentTitle(out var currentTitle);
-            currentTitle = hasUnderlyingTitle ? currentTitle.Trim() : string.Empty;
+            var hasUnderlyingTitle =
+                honorific.TryGetCurrentTitleState(out var currentState);
+
+            var currentTitle =
+                hasUnderlyingTitle
+                    ? currentState.Title.Trim()
+                    : string.Empty;
+
+            var currentStyleFingerprint =
+                hasUnderlyingTitle
+                    ? BuildHonorificStyleFingerprint(currentState)
+                    : "none";
 
             Log.Information(
                 $"Character Select+ recapture probe: hasTitle={hasUnderlyingTitle}, " +
                 $"current='{currentTitle}', previous='{characterSelectPreviousHonorificTitle}', " +
+                $"styleChanged={!string.Equals(currentStyleFingerprint, characterSelectPreviousHonorificStyleFingerprint, StringComparison.Ordinal)}, " +
                 $"deadlineReached={deadlineReached}.");
 
             var changedFromPrevious =
                 hasUnderlyingTitle &&
-                !string.Equals(
-                    currentTitle,
-                    characterSelectPreviousHonorificTitle,
-                    StringComparison.Ordinal);
+                (
+                    !string.Equals(
+                        currentTitle,
+                        characterSelectPreviousHonorificTitle,
+                        StringComparison.Ordinal) ||
+                    !string.Equals(
+                        currentStyleFingerprint,
+                        characterSelectPreviousHonorificStyleFingerprint,
+                        StringComparison.Ordinal)
+                );
 
             // A different underlying title means CS+'s Honorific macro has landed.
             // If nothing changes, keep STH relinquished until the timeout; this also
@@ -1584,6 +1692,12 @@ public sealed class Plugin : IDalamudPlugin
                 StringComparison.Ordinal);
 
             config.CachedHonorificTitle = currentTitle;
+
+            if (hasUnderlyingTitle)
+                changedCache |= CacheHonorificStyle(currentState);
+            else
+                changedCache |= ClearCachedHonorificStyle();
+
             originalHonorificCaptureFinished = true;
             appliedFingerprint = null;
 
@@ -1592,6 +1706,7 @@ public sealed class Plugin : IDalamudPlugin
 
             characterSelectRecaptureActive = false;
             characterSelectPreviousHonorificTitle = string.Empty;
+            characterSelectPreviousHonorificStyleFingerprint = string.Empty;
             Interlocked.Exchange(ref pendingCharacterSelectCaptureUtcTicks, 0);
             Interlocked.Exchange(ref characterSelectCaptureDeadlineUtcTicks, 0);
 
@@ -1617,6 +1732,7 @@ public sealed class Plugin : IDalamudPlugin
             // Do not destroy a known-good cache just because the IPC read failed.
             characterSelectRecaptureActive = false;
             characterSelectPreviousHonorificTitle = string.Empty;
+            characterSelectPreviousHonorificStyleFingerprint = string.Empty;
             Interlocked.Exchange(ref pendingCharacterSelectCaptureUtcTicks, 0);
             Interlocked.Exchange(ref characterSelectCaptureDeadlineUtcTicks, 0);
             appliedFingerprint = null;
@@ -2264,6 +2380,11 @@ public sealed class Plugin : IDalamudPlugin
             ? $"|cachedHonorific:{config.CachedHonorificTitle}"
             : string.Empty;
 
+        var matchedHonorificStylePart =
+            config.MatchCharacterSelectHonorificStyle
+                ? $"|matchCharacterSelectStyle:true|cachedHonorificStyle:{BuildCachedHonorificStyleFingerprint()}"
+                : "|matchCharacterSelectStyle:false";
+
         var contentFilterPart =
             $"|contentFilter:{config.EnableContentFilter}" +
             $"|contentFilterSmart:{config.SmartContentFilterMatching}" +
@@ -2287,7 +2408,7 @@ public sealed class Plugin : IDalamudPlugin
             $"|gradientB:{config.GradientColorB.X:F4},{config.GradientColorB.Y:F4},{config.GradientColorB.Z:F4}" +
             $"|gradientC:{config.GradientColorC.X:F4},{config.GradientColorC.Y:F4},{config.GradientColorC.Z:F4}";
 
-        return $"{track.Fingerprint}|prefix:{config.IsPrefix}|paused:{paused}|strip:{config.StripBracketedTrackParts}|smartfit:{config.SmartFitLongTitles}|format:{config.TitleFormat}{honorificCachePart}{stylePart}{supporterStylePart}{contentFilterPart}{progressPart}{listeningSessionPart}";
+        return $"{track.Fingerprint}|prefix:{config.IsPrefix}|paused:{paused}|strip:{config.StripBracketedTrackParts}|smartfit:{config.SmartFitLongTitles}|format:{config.TitleFormat}{honorificCachePart}{stylePart}{supporterStylePart}{matchedHonorificStylePart}{contentFilterPart}{progressPart}{listeningSessionPart}";
     }
 
     private void TryAutoCaptureOriginalHonorificTitle()
@@ -2340,12 +2461,16 @@ public sealed class Plugin : IDalamudPlugin
 
         try
         {
-            if (honorific.TryGetCurrentTitle(out var currentTitle))
+            if (honorific.TryGetCurrentTitleState(out var currentState))
             {
+                var currentTitle = currentState.Title;
+
                 var changed = !string.Equals(
                     config.CachedHonorificTitle,
                     currentTitle,
                     StringComparison.Ordinal);
+
+                changed |= CacheHonorificStyle(currentState);
 
                 config.CachedHonorificTitle = currentTitle;
                 originalHonorificCaptureFinished = true;
@@ -2357,8 +2482,8 @@ public sealed class Plugin : IDalamudPlugin
 
                     Log.Information(
                         refreshExistingCache
-                            ? "Synchronized cached Honorific title while STH is disabled."
-                            : "Cached the existing Honorific title before STH's first title write.");
+                            ? "Synchronized cached Honorific title/style while STH is disabled."
+                            : "Cached the existing Honorific title/style before STH's first title write.");
                 }
             }
         }
@@ -2584,37 +2709,64 @@ public sealed class Plugin : IDalamudPlugin
                 }
             }
 
-            var supporterGradient = config.HonorificSupporterConfirmed && config.UseSupporterGradient;
-            var color = config.UseTitleColor ? config.TitleColor : (System.Numerics.Vector3?)null;
-            System.Numerics.Vector3? glow = null;
-            System.Numerics.Vector3? color3 = null;
+            Vector3? color = null;
+            Vector3? glow = null;
+            Vector3? color3 = null;
             int? gradientColourSet = null;
             int? gradientAnimationStyle = null;
 
-            if (supporterGradient)
+            if (config.MatchCharacterSelectHonorificStyle &&
+                config.CachedHonorificStyleCaptured)
             {
-                // Stored numerically so we can pass Honorific's enum through IPC
-                // without taking a compile-time Honorific assembly dependency.
-                gradientAnimationStyle = Math.Max(0, config.GradientAnimationStyle);
-
-                if (config.UseCustomDualGradient)
-                {
-                    // Honorific's custom GradientColourSet = -1 form uses THREE
-                    // colours: Color + Glow + Color3. v0.0.10 only populated the
-                    // latter two, which could fall back to black/white in static mode.
-                    gradientColourSet = -1;
-                    color = config.GradientColorA;
-                    glow = config.GradientColorB;
-                    color3 = config.GradientColorC;
-                }
-                else
-                {
-                    gradientColourSet = Math.Max(0, config.GradientColourSet);
-                }
+                // Character Select+ ultimately applies its style through Honorific.
+                // Reuse Honorific's final TitleData instead of depending on CS+'s
+                // internal save format or trying to duplicate its style logic.
+                color = config.CachedHonorificColor;
+                glow = config.CachedHonorificGlow;
+                color3 = config.CachedHonorificColor3;
+                gradientColourSet =
+                    config.CachedHonorificGradientColourSet;
+                gradientAnimationStyle =
+                    config.CachedHonorificGradientAnimationStyle;
             }
-            else if (config.UseTitleColor && config.UseTitleGlow)
+            else
             {
-                glow = config.TitleGlowColor;
+                var supporterGradient =
+                    config.HonorificSupporterConfirmed &&
+                    config.UseSupporterGradient;
+
+                color =
+                    config.UseTitleColor
+                        ? config.TitleColor
+                        : (Vector3?)null;
+
+                if (supporterGradient)
+                {
+                    // Stored numerically so we can pass Honorific's enum through IPC
+                    // without taking a compile-time Honorific assembly dependency.
+                    gradientAnimationStyle =
+                        Math.Max(0, config.GradientAnimationStyle);
+
+                    if (config.UseCustomDualGradient)
+                    {
+                        // Honorific's custom GradientColourSet = -1 form uses THREE
+                        // colours: Color + Glow + Color3.
+                        gradientColourSet = -1;
+                        color = config.GradientColorA;
+                        glow = config.GradientColorB;
+                        color3 = config.GradientColorC;
+                    }
+                    else
+                    {
+                        gradientColourSet =
+                            Math.Max(0, config.GradientColourSet);
+                    }
+                }
+                else if (config.UseTitleColor &&
+                         config.UseTitleGlow)
+                {
+                    glow = config.TitleGlowColor;
+                }
             }
 
             if (hasAppliedTitle &&
