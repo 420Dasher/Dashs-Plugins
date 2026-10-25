@@ -2,7 +2,7 @@
 {
     "Author":  "Dash + AI",
     "Name":  "SpotifyTrackHonorific",
-   "TestingAssemblyVersion":  "1.0.20.2"fic",
+    "InternalName":  "SpotifyTrackHonorific",
     "AssemblyVersion":  "1.0.19.0",
     "TestingAssemblyVersion":  "1.0.20.2",
     "Description":  "Shows your current Spotify track as an Honorific title, including local files, formatting, cleanup, styling, supporter effects, reliability handling, content filtering, saved profiles, portable settings, and optional combat auto-hide.",
