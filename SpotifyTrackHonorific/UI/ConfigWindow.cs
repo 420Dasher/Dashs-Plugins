@@ -13,9 +13,43 @@ internal sealed class ConfigWindow : Window
 {
     private const string RotatingPreset = "» {cycle:10|vibing to music|{track}|{artist}} «";
 
+    private enum MainPage
+    {
+        Overview,
+        Title,
+        Profiles,
+        Filter
+    }
+
+    private enum SettingsPage
+    {
+        General,
+        Appearance,
+        Connection,
+        Advanced
+    }
+
+    private static readonly string[] MainPageLabels =
+    {
+        "Overview",
+        "Title",
+        "Profiles",
+        "Filter"
+    };
+
+    private static readonly string[] SettingsPageLabels =
+    {
+        "General",
+        "Appearance",
+        "Connection",
+        "Advanced"
+    };
+
     private readonly Plugin plugin;
+    private SettingsWindow? settingsWindow;
+    private MainPage mainPage = MainPage.Overview;
+    private SettingsPage settingsPage = SettingsPage.General;
     private string clientIdDraft;
-    private bool showOnboardingSetup;
     private bool confirmResetDisplay;
     private bool confirmForgetSpotify;
     private bool confirmImportSettings;
@@ -37,111 +71,149 @@ internal sealed class ConfigWindow : Window
     private string honorificCacheStatus = string.Empty;
 
     public ConfigWindow(Plugin plugin)
-        : base("SpotifyTrackHonorific###SpotifyTrackHonorificSettings")
+        : base("SpotifyTrackHonorific###SpotifyTrackHonorificMain")
     {
         this.plugin = plugin;
         clientIdDraft = plugin.Config.SpotifyClientId;
-        Size = new Vector2(860, 760);
+        Size = new Vector2(760, 650);
         SizeCondition = ImGuiCond.FirstUseEver;
     }
 
-    internal void SyncClientId() => clientIdDraft = plugin.Config.SpotifyClientId;
+    internal void AttachSettingsWindow(SettingsWindow window) =>
+        settingsWindow = window;
+
+    internal void SyncClientId() =>
+        clientIdDraft = plugin.Config.SpotifyClientId;
 
     public override void Draw()
     {
+        PushUiSpacing();
+
+        try
+        {
+            DrawHeader();
+
+            if (!plugin.Config.OnboardingCompleted)
+            {
+                DrawWelcome();
+                return;
+            }
+
+            ImGui.Spacing();
+            DrawMainNavigation();
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            switch (mainPage)
+            {
+                case MainPage.Overview:
+                    DrawOverviewPage();
+                    break;
+
+                case MainPage.Title:
+                    DrawTitleTab();
+                    break;
+
+                case MainPage.Profiles:
+                    DrawProfilesPage();
+                    break;
+
+                case MainPage.Filter:
+                    DrawFilterTab();
+                    break;
+            }
+        }
+        finally
+        {
+            ImGui.PopStyleVar(3);
+        }
+    }
+
+    private static void PushUiSpacing()
+    {
         ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 4f);
         ImGui.PushStyleVar(ImGuiStyleVar.TabRounding, 4f);
-        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(8f, 6f));
-
-        DrawHeader();
-
-        var config = plugin.Config;
-        if (!config.OnboardingCompleted && !showOnboardingSetup)
-        {
-            DrawWelcome();
-            ImGui.PopStyleVar(3);
-            return;
-        }
-
-        ImGui.Spacing();
-
-        if (ImGui.BeginTabBar("##sth-main-tabs"))
-        {
-            if (ImGui.BeginTabItem("Dashboard"))
-            {
-                DrawHomeTab();
-                ImGui.EndTabItem();
-            }
-
-            if (ImGui.BeginTabItem("Title"))
-            {
-                DrawTitleTab();
-                ImGui.EndTabItem();
-            }
-
-            if (ImGui.BeginTabItem("Filter"))
-            {
-                DrawFilterTab();
-                ImGui.EndTabItem();
-            }
-
-            if (ImGui.BeginTabItem("Appearance"))
-            {
-                DrawAppearanceTab();
-                ImGui.EndTabItem();
-            }
-
-            if (ImGui.BeginTabItem("Advanced"))
-            {
-                DrawAdvancedTab();
-                ImGui.EndTabItem();
-            }
-
-            ImGui.EndTabBar();
-        }
-
-        ImGui.PopStyleVar(3);
+        ImGui.PushStyleVar(
+            ImGuiStyleVar.ItemSpacing,
+            new Vector2(7f, 5f));
     }
-    private static unsafe Vector4 GetDalamudAccentColor() =>
-        *ImGui.GetStyleColorVec4(ImGuiCol.CheckMark);
+    private static unsafe Vector4 GetDalamudColor(ImGuiCol color) =>
+        *ImGui.GetStyleColorVec4(color);
+
+    private static Vector4 GetDalamudAccentColor() =>
+        GetDalamudColor(ImGuiCol.CheckMark);
+
+    private void OpenSettings()
+    {
+        if (settingsWindow != null)
+            settingsWindow.IsOpen = true;
+    }
 
     private void DrawHeader()
     {
         var config = plugin.Config;
 
-        ImGui.PushStyleColor(
-            ImGuiCol.Text,
-            GetDalamudAccentColor());
-        ImGui.TextUnformatted("SpotifyTrackHonorific");
-        ImGui.PopStyleColor();
+        ImGui.TextColored(
+            GetDalamudAccentColor(),
+            "SPOTIFY TRACK HONORIFIC");
 
         ImGui.SameLine();
         ImGui.TextDisabled($"v{Plugin.DisplayVersion}");
+
+        ImGui.SameLine(
+            MathF.Max(
+                420f,
+                ImGui.GetWindowWidth() - 90f));
+
+        if (ImGui.SmallButton("Settings"))
+            OpenSettings();
+
         ImGui.Separator();
 
         if (ImGui.BeginTable(
             "##sth-header-status",
             4,
-            ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.BordersInnerV))
+            ImGuiTableFlags.SizingStretchProp))
         {
-            ImGui.TableSetupColumn("##title-updates", ImGuiTableColumnFlags.WidthStretch, 1.0f);
-            ImGui.TableSetupColumn("##spotify", ImGuiTableColumnFlags.WidthStretch, 1.0f);
-            ImGui.TableSetupColumn("##honorific", ImGuiTableColumnFlags.WidthStretch, 1.0f);
-            ImGui.TableSetupColumn("##profile", ImGuiTableColumnFlags.WidthStretch, 1.5f);
+            ImGui.TableSetupColumn(
+                "##title-updates",
+                ImGuiTableColumnFlags.WidthStretch,
+                1.0f);
+
+            ImGui.TableSetupColumn(
+                "##spotify",
+                ImGuiTableColumnFlags.WidthStretch,
+                1.0f);
+
+            ImGui.TableSetupColumn(
+                "##honorific",
+                ImGuiTableColumnFlags.WidthStretch,
+                1.0f);
+
+            ImGui.TableSetupColumn(
+                "##profile",
+                ImGuiTableColumnFlags.WidthStretch,
+                1.5f);
 
             ImGui.TableNextRow();
 
             DrawStatusCell(
-                "TITLE UPDATES",
+                "TITLE",
                 config.Enabled ? "ENABLED" : "DISABLED");
 
             DrawStatusCell(
                 "SPOTIFY",
-                plugin.IsAuthenticated ? "CONNECTED" : "SETUP REQUIRED");
+                plugin.IsAuthenticated
+                    ? "CONNECTED"
+                    : "SETUP REQUIRED");
 
             DrawStatusCell(
                 "HONORIFIC",
-                plugin.HonorificDetected ? "READY" : "NOT DETECTED");
+                plugin.HonorificDetected
+                    ? "READY"
+                    : "NOT DETECTED");
 
             DrawStatusCell(
                 "PROFILE",
@@ -151,26 +223,362 @@ internal sealed class ConfigWindow : Window
         }
 
         ImGui.Spacing();
-        ImGui.TextDisabled($"Now playing: {plugin.NowPlayingText}");
+        ImGui.TextDisabled(
+            $"Now playing: {plugin.NowPlayingText}");
+    }
+
+    private void DrawMainNavigation()
+    {
+        DrawPageButtonRow(
+            "main",
+            MainPageLabels,
+            (int)mainPage,
+            index => mainPage = (MainPage)index);
+    }
+
+    private void DrawSettingsNavigation()
+    {
+        DrawPageButtonRow(
+            "settings",
+            SettingsPageLabels,
+            (int)settingsPage,
+            index => settingsPage = (SettingsPage)index);
+    }
+
+    private static void DrawPageButtonRow(
+        string idPrefix,
+        string[] labels,
+        int selectedIndex,
+        Action<int> onSelect)
+    {
+        if (labels.Length == 0)
+            return;
+
+        const float gap = 6f;
+
+        var available = ImGui.GetContentRegionAvail().X;
+        var totalGap = gap * (labels.Length - 1);
+
+        var buttonWidth = MathF.Max(
+            90f,
+            (available - totalGap) / labels.Length);
+
+        for (var i = 0; i < labels.Length; i++)
+        {
+            if (i > 0)
+                ImGui.SameLine(0f, gap);
+
+            var selected = i == selectedIndex;
+
+            if (selected)
+            {
+                ImGui.PushStyleColor(
+                    ImGuiCol.Button,
+                    GetDalamudColor(ImGuiCol.ButtonActive));
+            }
+
+            if (ImGui.Button(
+                $"{labels[i]}##{idPrefix}-page-{i}",
+                new Vector2(buttonWidth, 26f)))
+            {
+                onSelect(i);
+            }
+
+            if (selected)
+                ImGui.PopStyleColor();
+        }
     }
     private void DrawWelcome()
     {
-        ImGui.Text("Welcome to SpotifyTrackHonorific");
-        ImGui.Spacing();
-        ImGui.TextWrapped("This plugin shows the music you are listening to on Spotify as an Honorific title in FFXIV.");
-        ImGui.Spacing();
-        ImGui.Text("Setup takes four steps:");
-        ImGui.TextWrapped("1. Create a Spotify Developer app and copy its Client ID.");
-        ImGui.TextWrapped("2. Add the callback address shown here to that app.");
-        ImGui.TextWrapped("3. Connect Spotify in this window.");
-        ImGui.TextWrapped("4. Make sure Honorific is installed and enabled, then play some music.");
+        DrawSectionHeader(
+            "Welcome",
+            "Show your current Spotify track as an Honorific title.");
+
+        ImGui.TextWrapped(
+            "Setup takes four steps:");
+
+        ImGui.TextWrapped(
+            "1. Create a Spotify Developer app and copy its Client ID.");
+
+        ImGui.TextWrapped(
+            "2. Add the callback address shown in Settings.");
+
+        ImGui.TextWrapped(
+            "3. Connect Spotify.");
+
+        ImGui.TextWrapped(
+            "4. Make sure Honorific is installed and enabled, then play some music.");
+
         ImGui.Spacing();
 
-        if (ImGui.Button("Get Started"))
-            showOnboardingSetup = true;
+        if (ImGui.Button("Open setup"))
+        {
+            settingsPage = SettingsPage.Connection;
+            OpenSettings();
+        }
 
         ImGui.SameLine();
-        ImGui.TextDisabled("Your Spotify password is never requested or stored by this plugin.");
+
+        ImGui.TextDisabled(
+            "Your Spotify password is never requested or stored.");
+    }
+
+    private void DrawOverviewPage()
+    {
+        var config = plugin.Config;
+
+        DrawSectionHeader(
+            "Now Playing",
+            "Current Spotify state and the Honorific output STH is preparing.");
+
+        ImGui.TextWrapped(plugin.NowPlayingText);
+
+        ImGui.Spacing();
+
+        ImGui.TextDisabled(
+            $"Honorific title: {plugin.PreviewTitle}");
+
+        DrawSectionHeader("Title Updates");
+
+        var enabled = config.Enabled;
+
+        if (ImGui.Checkbox(
+            "Enable Spotify title updates",
+            ref enabled))
+        {
+            config.Enabled = enabled;
+            plugin.SettingsChanged();
+        }
+
+        ImGui.SameLine();
+        ImGui.TextDisabled(plugin.StateText);
+
+        if (!string.IsNullOrWhiteSpace(plugin.ErrorText))
+        {
+            ImGui.Spacing();
+
+            ImGui.TextWrapped(
+                plugin.IsAuthenticated
+                    ? "Spotify is temporarily unavailable. STH keeps the last valid title while retrying."
+                    : "Spotify needs attention. Open Settings to reconnect.");
+        }
+
+        if (!plugin.IsAuthenticated)
+        {
+            ImGui.Spacing();
+
+            if (ImGui.Button("Open Spotify setup"))
+            {
+                settingsPage = SettingsPage.Connection;
+                OpenSettings();
+            }
+        }
+
+        DrawQuickProfiles();
+
+        DrawSectionHeader("Quick Actions");
+
+        if (ImGui.Button("Test Honorific"))
+            plugin.TestHonorificTitle();
+
+        ImGui.SameLine();
+
+        if (ImGui.Button("Clear STH title"))
+            plugin.ClearPluginTitle();
+
+        if (config.Enabled &&
+            !string.IsNullOrWhiteSpace(plugin.ErrorText))
+        {
+            ImGui.SameLine();
+
+            if (ImGui.Button("Retry Spotify"))
+                plugin.RetrySpotifyNow();
+        }
+    }
+
+    private void DrawProfilesPage()
+    {
+        DrawSectionHeader(
+            "Saved Profiles",
+            "Save and switch complete title, appearance, and filter setups.");
+
+        DrawSavedProfiles();
+
+        if (!string.IsNullOrWhiteSpace(profileStatus))
+            ImGui.TextDisabled(profileStatus);
+    }
+
+    internal void DrawSettingsContents()
+    {
+        PushUiSpacing();
+
+        try
+        {
+            DrawSettingsHeader();
+
+            ImGui.Spacing();
+            DrawSettingsNavigation();
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            switch (settingsPage)
+            {
+                case SettingsPage.General:
+                    DrawGeneralSettingsPage();
+                    break;
+
+                case SettingsPage.Appearance:
+                    DrawAppearanceTab();
+                    break;
+
+                case SettingsPage.Connection:
+                    DrawConnectionSettingsPage();
+                    break;
+
+                case SettingsPage.Advanced:
+                    DrawAdvancedTab();
+                    break;
+            }
+        }
+        finally
+        {
+            ImGui.PopStyleVar(3);
+        }
+    }
+
+    private void DrawSettingsHeader()
+    {
+        ImGui.TextColored(
+            GetDalamudAccentColor(),
+            "SETTINGS");
+
+        ImGui.SameLine();
+        ImGui.TextDisabled($"v{Plugin.DisplayVersion}");
+
+        ImGui.Separator();
+
+        ImGui.TextDisabled(
+            "Changes apply immediately.");
+    }
+
+    private void DrawGeneralSettingsPage()
+    {
+        var config = plugin.Config;
+
+        DrawSectionHeader(
+            "Playback",
+            "Choose when Spotify playback is allowed to produce an Honorific title.");
+
+        var normalTracks = config.ShowNormalTracks;
+
+        if (ImGui.Checkbox(
+            "Show regular Spotify tracks",
+            ref normalTracks))
+        {
+            config.ShowNormalTracks = normalTracks;
+            plugin.SettingsChanged();
+        }
+
+        var localTracks = config.ShowLocalTracks;
+
+        if (ImGui.Checkbox(
+            "Show Spotify local files",
+            ref localTracks))
+        {
+            config.ShowLocalTracks = localTracks;
+            plugin.SettingsChanged();
+        }
+
+        var clearOnPause = config.ClearOnPause;
+
+        if (ImGui.Checkbox(
+            "Hide title while playback is paused or stopped",
+            ref clearOnPause))
+        {
+            config.ClearOnPause = clearOnPause;
+            plugin.SettingsChanged();
+        }
+
+        var hideInCombat = config.AutoHideInCombat;
+
+        if (ImGui.Checkbox(
+            "Hide Spotify title during combat",
+            ref hideInCombat))
+        {
+            config.AutoHideInCombat = hideInCombat;
+            plugin.SettingsChanged();
+        }
+
+        HelpMarker(
+            "Only the Honorific title is hidden. Spotify polling continues and the cached title returns after combat.");
+
+        DrawSectionHeader(
+            "Compatibility",
+            "Optional interoperability with other Honorific writers.");
+
+        var patMeSupport =
+            config.EnablePatMeHonorificSupport;
+
+        if (ImGui.Checkbox(
+            "PatMeHonorific compatibility",
+            ref patMeSupport))
+        {
+            config.EnablePatMeHonorificSupport =
+                patMeSupport;
+
+            plugin.SettingsChanged();
+        }
+
+        HelpMarker(
+            "Lets PatMeHonorific temporarily replace STH, then restores Spotify afterward.");
+
+        if (config.EnablePatMeHonorificSupport)
+        {
+            ImGui.TextDisabled(
+                plugin.PatMeHonorificYieldActive
+                    ? "PatMeHonorific currently owns the temporary title."
+                    : "Ready.");
+        }
+    }
+
+    private void DrawConnectionSettingsPage()
+    {
+        DrawSectionHeader(
+            "Spotify",
+            "Authorization and connection settings.");
+
+        ImGui.TextDisabled(
+            $"State: {plugin.StateText}");
+
+        ImGui.TextDisabled(
+            $"Health: {plugin.ReliabilityText}");
+
+        ImGui.Spacing();
+
+        DrawSpotifyConnectionSetup();
+
+        DrawSectionHeader(
+            "Honorific",
+            "STH sends the rendered Spotify title through Honorific IPC.");
+
+        ImGui.TextDisabled(
+            plugin.HonorificDetected
+                ? "Honorific detected and ready."
+                : "Honorific is not currently detected.");
+
+        if (ImGui.Button("Test Honorific"))
+            plugin.TestHonorificTitle();
+
+        if (plugin.IsAuthenticated &&
+            !string.IsNullOrWhiteSpace(plugin.ErrorText))
+        {
+            ImGui.SameLine();
+
+            if (ImGui.Button("Retry Spotify"))
+                plugin.RetrySpotifyNow();
+        }
     }
 
     private void DrawHomeTab()
@@ -346,8 +754,8 @@ internal sealed class ConfigWindow : Window
             }
         }
 
-        if (ImGui.CollapsingHeader("Manage saved profiles"))
-            DrawSavedProfiles();
+        ImGui.TextDisabled(
+            "Use the Profiles page to create, rename, reorder, duplicate, or delete profiles.");
 
         if (!string.IsNullOrWhiteSpace(profileStatus))
             ImGui.TextDisabled(profileStatus);
@@ -980,7 +1388,7 @@ internal sealed class ConfigWindow : Window
             ImGui.EndDisabled();
 
         ImGui.TextDisabled(
-            "Profile order also controls the Dashboard quick-profile order.");
+            "Profile order also controls the Overview quick-profile order.");
     }
     private void DrawFilterTab()
     {
@@ -1943,7 +2351,7 @@ internal sealed class ConfigWindow : Window
 
         if (ImGui.CollapsingHeader("Command-line tools"))
         {
-            ImGui.TextDisabled("/sth              - open settings");
+            ImGui.TextDisabled("/sth              - open main window");
             ImGui.TextDisabled("/sth status       - connection/reliability status");
             ImGui.TextDisabled("/sth now          - current detected track/title");
             ImGui.TextDisabled("/sth retry        - retry Spotify");
@@ -2024,12 +2432,22 @@ internal sealed class ConfigWindow : Window
     {
         ImGui.TableNextColumn();
         ImGui.TextDisabled(label);
-        ImGui.TextUnformatted(value);
+
+        ImGui.TextColored(
+            GetDalamudAccentColor(),
+            value);
     }
-    private static void DrawSectionHeader(string title, string? description = null)
+
+    private static void DrawSectionHeader(
+        string title,
+        string? description = null)
     {
         ImGui.Spacing();
-        ImGui.Text(title);
+
+        ImGui.TextColored(
+            GetDalamudAccentColor(),
+            title.ToUpperInvariant());
+
         ImGui.Separator();
 
         if (!string.IsNullOrWhiteSpace(description))

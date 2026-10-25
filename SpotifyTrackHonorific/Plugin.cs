@@ -24,7 +24,7 @@ namespace SpotifyTrackHonorific;
 
 public sealed class Plugin : IDalamudPlugin
 {
-    internal const string DisplayVersion = "1.0.19";
+    internal const string DisplayVersion = "1.0.20-dev1";
     private const string ShortCommand = "/sth";
     private const string LongCommand = "/spotifytrackhonorific";
     private static readonly TimeSpan NormalPollInterval = TimeSpan.FromSeconds(15);
@@ -65,6 +65,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly CancellationTokenSource lifetimeCts = new();
     private readonly WindowSystem windowSystem = new("SpotifyTrackHonorific");
     private readonly ConfigWindow configWindow;
+    private readonly SettingsWindow settingsWindow;
 
     private long nextPollUtcTicks = DateTimeOffset.UtcNow.UtcDateTime.Ticks;
     private int pollInProgress;
@@ -210,11 +211,16 @@ public sealed class Plugin : IDalamudPlugin
         originalHonorificCaptureFinished = !string.IsNullOrWhiteSpace(config.CachedHonorificTitle);
 
         configWindow = new ConfigWindow(this);
+        settingsWindow = new SettingsWindow(configWindow);
+
+        configWindow.AttachSettingsWindow(settingsWindow);
+
         windowSystem.AddWindow(configWindow);
+        windowSystem.AddWindow(settingsWindow);
 
         var commandInfo = new CommandInfo(OnCommand)
         {
-            HelpMessage = "Open SpotifyTrackHonorific settings. Use '/sth help' for commands."
+            HelpMessage = "Open SpotifyTrackHonorific. Use '/sth help' for commands."
         };
         CommandManager.AddHandler(ShortCommand, commandInfo);
         CommandManager.AddHandler(LongCommand, new CommandInfo(OnCommand)
@@ -228,15 +234,15 @@ public sealed class Plugin : IDalamudPlugin
         ClientState.Logout += OnClientLogout;
         ClientState.TerritoryChanged += OnTerritoryChanged;
         PluginInterface.UiBuilder.Draw += windowSystem.Draw;
-        PluginInterface.UiBuilder.OpenConfigUi += OpenConfigUi;
-        PluginInterface.UiBuilder.OpenMainUi += OpenConfigUi;
+        PluginInterface.UiBuilder.OpenConfigUi += OpenSettingsUi;
+        PluginInterface.UiBuilder.OpenMainUi += OpenMainUi;
 
         // A dev-plugin reload can happen while already logged in, so treat the
         // current character as a fresh session too.
         if (ClientState.IsLoggedIn)
             ResetForCharacterSessionStart();
 
-        ChatGui.Print($"SpotifyTrackHonorific v{DisplayVersion} loaded. Use /sth to open settings.");
+        ChatGui.Print($"SpotifyTrackHonorific v{DisplayVersion} loaded. Use /sth to open it.");
     }
 
     public void Dispose()
@@ -249,8 +255,8 @@ public sealed class Plugin : IDalamudPlugin
         ClientState.Logout -= OnClientLogout;
         ClientState.TerritoryChanged -= OnTerritoryChanged;
         PluginInterface.UiBuilder.Draw -= windowSystem.Draw;
-        PluginInterface.UiBuilder.OpenConfigUi -= OpenConfigUi;
-        PluginInterface.UiBuilder.OpenMainUi -= OpenConfigUi;
+        PluginInterface.UiBuilder.OpenConfigUi -= OpenSettingsUi;
+        PluginInterface.UiBuilder.OpenMainUi -= OpenMainUi;
 
         CommandManager.RemoveHandler(ShortCommand);
         CommandManager.RemoveHandler(LongCommand);
@@ -263,7 +269,11 @@ public sealed class Plugin : IDalamudPlugin
         lifetimeCts.Dispose();
     }
 
-    private void OpenConfigUi() => configWindow.IsOpen = true;
+    private void OpenMainUi() =>
+        configWindow.IsOpen = true;
+
+    private void OpenSettingsUi() =>
+        settingsWindow.IsOpen = true;
 
     internal void SettingsChanged()
     {
@@ -2886,7 +2896,7 @@ public sealed class Plugin : IDalamudPlugin
         switch (sub)
         {
             case "config":
-                OpenConfigUi();
+                OpenMainUi();
                 break;
 
             case "auth":
@@ -3043,7 +3053,7 @@ public sealed class Plugin : IDalamudPlugin
     private static void PrintHelp()
     {
         ChatGui.Print("SpotifyTrackHonorific commands:");
-        ChatGui.Print("/sth                    - open settings");
+        ChatGui.Print("/sth                    - open main window");
         ChatGui.Print("/sth auth <client-id>   - authenticate with Spotify using PKCE");
         ChatGui.Print("/sth status             - show auth/poll state");
         ChatGui.Print("/sth now                - show the detected current track/title");
