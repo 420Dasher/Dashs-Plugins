@@ -13,9 +13,9 @@
     <Product>SpotifyTrackHonorific</Product>
     <AssemblyTitle>SpotifyTrackHonorific</AssemblyTitle>
 
-    <Version>1.0.20.1</Version>
-    <AssemblyVersion>1.0.20.1</AssemblyVersion>
-    <FileVersion>1.0.20.1</FileVersion>
+    <Version>1.0.20.2</Version>
+    <AssemblyVersion>1.0.20.2</AssemblyVersion>
+    <FileVersion>1.0.20.2</FileVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>false</IsPackable>
   </PropertyGroup>

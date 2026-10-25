@@ -9,11 +9,11 @@ internal sealed class SettingsWindow : Window
     private readonly ConfigWindow owner;
 
     internal SettingsWindow(ConfigWindow owner)
-        : base("SpotifyTrackHonorific - Settings###SpotifyTrackHonorificSettings")
+        : base("SpotifyTrackHonorific - Settings###SpotifyTrackHonorificSettingsV2")
     {
         this.owner = owner;
 
-        Size = new Vector2(700f, 620f);
+        Size = new Vector2(660f, 500f);
         SizeCondition = ImGuiCond.FirstUseEver;
     }
 

@@ -1,6 +1,9 @@
 # Changelog
-## 1.0.20 DEV1 - Refined Interface
+## 1.0.20 DEV2 - Refined Interface
 
+- Gives the redesigned Settings window a fresh saved-window identity so it no longer inherits the oversized legacy configuration-window dimensions.
+- Uses a compact Settings default size with scrolling available for longer pages such as Appearance.
+- Tightens the Settings header, General playback controls, Connection status, Appearance wording, and Advanced diagnostics layout.
 - Reworks the main STH window around the newer Dash plugin visual language used by AethernetAssist, APGambaHax, and MarketRun.
 - Replaces the crowded native tab bar with compact Overview, Title, Profiles, and Filter page buttons.
 - Moves playback, appearance, connection, diagnostics, backup, and advanced controls into a separate Settings window.

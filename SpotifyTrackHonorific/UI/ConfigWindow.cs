@@ -457,10 +457,18 @@ internal sealed class ConfigWindow : Window
         ImGui.SameLine();
         ImGui.TextDisabled($"v{Plugin.DisplayVersion}");
 
-        ImGui.Separator();
+        var applyText = "Changes apply immediately.";
+        var applyWidth =
+            ImGui.CalcTextSize(applyText).X;
 
-        ImGui.TextDisabled(
-            "Changes apply immediately.");
+        ImGui.SameLine(
+            MathF.Max(
+                300f,
+                ImGui.GetWindowWidth() -
+                applyWidth -
+                22f));
+
+        ImGui.TextDisabled(applyText);
     }
 
     private void DrawGeneralSettingsPage()
@@ -469,54 +477,86 @@ internal sealed class ConfigWindow : Window
 
         DrawSectionHeader(
             "Playback",
-            "Choose when Spotify playback is allowed to produce an Honorific title.");
+            "Choose which playback states are allowed to produce an Honorific title.");
 
-        var normalTracks = config.ShowNormalTracks;
-
-        if (ImGui.Checkbox(
-            "Show regular Spotify tracks",
-            ref normalTracks))
+        if (ImGui.BeginTable(
+            "##sth-playback-settings",
+            2,
+            ImGuiTableFlags.SizingStretchSame))
         {
-            config.ShowNormalTracks = normalTracks;
-            plugin.SettingsChanged();
+            ImGui.TableNextRow();
+
+            ImGui.TableNextColumn();
+
+            var normalTracks =
+                config.ShowNormalTracks;
+
+            if (ImGui.Checkbox(
+                "Regular Spotify tracks",
+                ref normalTracks))
+            {
+                config.ShowNormalTracks =
+                    normalTracks;
+
+                plugin.SettingsChanged();
+            }
+
+            ImGui.TableNextColumn();
+
+            var localTracks =
+                config.ShowLocalTracks;
+
+            if (ImGui.Checkbox(
+                "Spotify local files",
+                ref localTracks))
+            {
+                config.ShowLocalTracks =
+                    localTracks;
+
+                plugin.SettingsChanged();
+            }
+
+            ImGui.TableNextRow();
+
+            ImGui.TableNextColumn();
+
+            var clearOnPause =
+                config.ClearOnPause;
+
+            if (ImGui.Checkbox(
+                "Hide while paused / stopped",
+                ref clearOnPause))
+            {
+                config.ClearOnPause =
+                    clearOnPause;
+
+                plugin.SettingsChanged();
+            }
+
+            ImGui.TableNextColumn();
+
+            var hideInCombat =
+                config.AutoHideInCombat;
+
+            if (ImGui.Checkbox(
+                "Hide during combat",
+                ref hideInCombat))
+            {
+                config.AutoHideInCombat =
+                    hideInCombat;
+
+                plugin.SettingsChanged();
+            }
+
+            HelpMarker(
+                "Only the Honorific title is hidden. Spotify polling continues and the cached title returns after combat.");
+
+            ImGui.EndTable();
         }
-
-        var localTracks = config.ShowLocalTracks;
-
-        if (ImGui.Checkbox(
-            "Show Spotify local files",
-            ref localTracks))
-        {
-            config.ShowLocalTracks = localTracks;
-            plugin.SettingsChanged();
-        }
-
-        var clearOnPause = config.ClearOnPause;
-
-        if (ImGui.Checkbox(
-            "Hide title while playback is paused or stopped",
-            ref clearOnPause))
-        {
-            config.ClearOnPause = clearOnPause;
-            plugin.SettingsChanged();
-        }
-
-        var hideInCombat = config.AutoHideInCombat;
-
-        if (ImGui.Checkbox(
-            "Hide Spotify title during combat",
-            ref hideInCombat))
-        {
-            config.AutoHideInCombat = hideInCombat;
-            plugin.SettingsChanged();
-        }
-
-        HelpMarker(
-            "Only the Honorific title is hidden. Spotify polling continues and the cached title returns after combat.");
 
         DrawSectionHeader(
             "Compatibility",
-            "Optional interoperability with other Honorific writers.");
+            "Allow temporary Honorific writers to coexist with STH.");
 
         var patMeSupport =
             config.EnablePatMeHonorificSupport;
@@ -536,37 +576,59 @@ internal sealed class ConfigWindow : Window
 
         if (config.EnablePatMeHonorificSupport)
         {
+            ImGui.SameLine();
+
             ImGui.TextDisabled(
                 plugin.PatMeHonorificYieldActive
-                    ? "PatMeHonorific currently owns the temporary title."
-                    : "Ready.");
+                    ? "PatMe currently active"
+                    : "Ready");
         }
     }
 
     private void DrawConnectionSettingsPage()
     {
         DrawSectionHeader(
-            "Spotify",
-            "Authorization and connection settings.");
+            "Status",
+            "Current external connection state.");
 
-        ImGui.TextDisabled(
-            $"State: {plugin.StateText}");
+        if (ImGui.BeginTable(
+            "##sth-connection-status",
+            2,
+            ImGuiTableFlags.SizingStretchSame))
+        {
+            ImGui.TableNextRow();
 
-        ImGui.TextDisabled(
-            $"Health: {plugin.ReliabilityText}");
+            ImGui.TableNextColumn();
+            ImGui.TextDisabled("SPOTIFY");
+            ImGui.TextColored(
+                GetDalamudAccentColor(),
+                plugin.IsAuthenticated
+                    ? "CONNECTED"
+                    : "SETUP REQUIRED");
 
-        ImGui.Spacing();
+            ImGui.TableNextColumn();
+            ImGui.TextDisabled("HONORIFIC");
+            ImGui.TextColored(
+                GetDalamudAccentColor(),
+                plugin.HonorificDetected
+                    ? "READY"
+                    : "NOT DETECTED");
+
+            ImGui.EndTable();
+        }
+
+        DrawMutedWrapped(
+            $"{plugin.StateText} | {plugin.ReliabilityText}");
+
+        DrawSectionHeader(
+            "Spotify authorization",
+            "Client ID and callback configuration.");
 
         DrawSpotifyConnectionSetup();
 
         DrawSectionHeader(
-            "Honorific",
-            "STH sends the rendered Spotify title through Honorific IPC.");
-
-        ImGui.TextDisabled(
-            plugin.HonorificDetected
-                ? "Honorific detected and ready."
-                : "Honorific is not currently detected.");
+            "Honorific IPC",
+            "STH sends the rendered Spotify title through Honorific.");
 
         if (ImGui.Button("Test Honorific"))
             plugin.TestHonorificTitle();
@@ -1976,7 +2038,7 @@ internal sealed class ConfigWindow : Window
 
         DrawSectionHeader(
             "Automatic appearance",
-            "STH can reuse the Honorific style applied when Character Select+ changes your character or profile.");
+            "Follow the underlying Honorific style applied by Character Select+.");
 
         var matchCharacterSelectStyle =
             config.MatchCharacterSelectHonorificStyle;
@@ -1995,16 +2057,13 @@ internal sealed class ConfigWindow : Window
         {
             ImGui.TextDisabled(
                 config.CachedHonorificStyleCaptured
-                    ? "Captured style available for the current character. Text color, glow, gradient, and animation will be reused."
-                    : "No underlying style captured yet. Switch Character Select+ profile/character once, or cache the current Honorific title.");
-
-            ImGui.TextDisabled(
-                "Manual appearance settings below remain the fallback if no captured style is available.");
+                    ? "Current-character style captured: color, glow, gradient, and animation."
+                    : "Waiting for an underlying current-character Honorific style.");
         }
 
         DrawSectionHeader(
-            "Standard appearance",
-            "Optional normal Honorific color and glow.");
+            "Manual fallback",
+            "Used when automatic matching is off or no captured style is available.");
 
         var useColor = config.UseTitleColor;
 
@@ -2065,7 +2124,7 @@ internal sealed class ConfigWindow : Window
 
         DrawSectionHeader(
             "Honorific supporter effects",
-            "Gradient and animation controls follow Honorific's trust-based supporter access.");
+            "Optional gradient and animation controls.");
 
         var supporterConfirmed = config.HonorificSupporterConfirmed;
 
@@ -2246,19 +2305,9 @@ internal sealed class ConfigWindow : Window
     {
         var config = plugin.Config;
 
-        DrawSectionHeader("Connection health");
-
-        ImGui.Text($"Spotify state: {plugin.StateText}");
-        ImGui.TextWrapped($"Health: {plugin.ReliabilityText}");
-        ImGui.TextDisabled("Playing/paused checks: about 15s | idle checks: about 60s");
-
-        if (!string.IsNullOrWhiteSpace(plugin.ErrorText) &&
-            ImGui.CollapsingHeader("Technical error details"))
-        {
-            ImGui.TextWrapped(plugin.ErrorText);
-        }
-
-        DrawSectionHeader("Tools");
+        DrawSectionHeader(
+            "Diagnostics & tools",
+            "Troubleshooting and manual IPC controls.");
 
         if (ImGui.Button("Retry Spotify"))
             plugin.RetrySpotifyNow();
@@ -2286,6 +2335,13 @@ internal sealed class ConfigWindow : Window
 
         if (!string.IsNullOrWhiteSpace(diagnosticsStatus))
             ImGui.TextDisabled(diagnosticsStatus);
+
+        if (!string.IsNullOrWhiteSpace(plugin.ErrorText) &&
+            ImGui.CollapsingHeader(
+                "Technical error details"))
+        {
+            ImGui.TextWrapped(plugin.ErrorText);
+        }
 
         DrawPortableSettings();
 
@@ -2370,7 +2426,7 @@ internal sealed class ConfigWindow : Window
     {
         DrawSectionHeader(
             "Backup / transfer",
-            "Portable settings include display, filter, and saved profiles. Spotify credentials and supporter confirmation are never exported.");
+            "Back up display, filter, and profile settings. Spotify credentials are never exported.");
 
         if (ImGui.Button("Copy portable settings"))
         {
