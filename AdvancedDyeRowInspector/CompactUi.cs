@@ -340,6 +340,44 @@ public sealed partial class Plugin
             "Theme follows the active Dalamud ImGui style.");
     }
 
+    // Fit the actual content to the available display.
+    // Preserve scrolling when content exceeds screen height.
+    private static void FitCompactWindow(float requiredHeight)
+    {
+        var display = ImGui.GetIO().DisplaySize;
+
+        float width = MathF.Min(
+            520f,
+            MathF.Max(200f, display.X - 24f));
+
+        float maxHeight = MathF.Max(
+            220f,
+            display.Y - 48f);
+
+        float height = MathF.Min(
+            MathF.Max(requiredHeight + 12f, 235f),
+            maxHeight);
+
+        ImGui.SetWindowSize(
+            new Vector2(width, height),
+            ImGuiCond.Always);
+
+        // Keep the resized window within the display.
+        var position = ImGui.GetWindowPos();
+
+        float maxX = MathF.Max(4f, display.X - width - 4f);
+        float maxY = MathF.Max(4f, display.Y - height - 4f);
+
+        float x = Math.Clamp(position.X, 4f, maxX);
+        float y = Math.Clamp(position.Y, 4f, maxY);
+
+        if (x != position.X || y != position.Y)
+        {
+            ImGui.SetWindowPos(
+                new Vector2(x, y),
+                ImGuiCond.Always);
+        }
+    }
     private void DrawCompact()
     {
         if (!windowOpen)
@@ -375,7 +413,7 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "v0.0.3.6  |  Experimental UV analysis");
+            "v0.0.3.7  |  Experimental UV analysis");
 
         ImGui.Spacing();
 
@@ -408,12 +446,8 @@ public sealed partial class Plugin
 
         ImGui.SameLine();
 
-        if (ImGui.SmallButton("Fit window"))
-        {
-            ImGui.SetWindowSize(
-                new Vector2(520f, 420f),
-                ImGuiCond.Always);
-        }
+        bool fitWindowRequested =
+            ImGui.SmallButton("Fit window");
 
         ImGui.Spacing();
 
@@ -421,6 +455,9 @@ public sealed partial class Plugin
         {
             ImGui.TextDisabled(
                 "Scan your outfit to inspect its dye rows.");
+
+            if (fitWindowRequested)
+                FitCompactWindow(ImGui.GetCursorPosY() + 20f);
 
             ImGui.End();
             ImGui.PopStyleVar();
@@ -463,6 +500,9 @@ public sealed partial class Plugin
                 "Open Advanced for resource diagnostics.");
 
             DrawCompactAdvanced(new List<ModelEntry>());
+
+            if (fitWindowRequested)
+                FitCompactWindow(ImGui.GetCursorPosY() + 20f);
 
             ImGui.End();
             ImGui.PopStyleVar();
@@ -507,6 +547,9 @@ public sealed partial class Plugin
 
         ImGui.Spacing();
 
+        float resultsStartY = ImGui.GetCursorPosY();
+        float resultsContentHeight = 0f;
+
         if (ImGui.BeginChild(
             "##ADRICompactResults",
             new Vector2(0f, 0f),
@@ -526,9 +569,25 @@ public sealed partial class Plugin
             }
 
             DrawCompactAdvanced(selectedModels);
+
+            // Child-local position includes content below
+            // the currently visible scroll area.
+            resultsContentHeight = ImGui.GetCursorPosY();
         }
 
         ImGui.EndChild();
+
+        if (fitWindowRequested)
+        {
+            float requiredHeight =
+                resultsStartY +
+                resultsContentHeight +
+                ImGui.GetStyle().WindowPadding.Y * 2f +
+                8f;
+
+            FitCompactWindow(requiredHeight);
+        }
+
         ImGui.End();
 
         ImGui.PopStyleVar();
