@@ -174,5 +174,36 @@
     "DownloadLinkInstall":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/MarketRun/latest.zip",
     "DownloadLinkUpdate":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/MarketRun/latest.zip",
     "DownloadLinkTesting":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/MarketRun/latest.zip"
+},
+{
+    "Author":  "Dash + AI",
+    "Name":  "AdvancedDyeRowInspector",
+    "InternalName":  "AdvancedDyeRowInspector",
+    "AssemblyVersion":  "0.0.0.0",
+    "TestingAssemblyVersion":  "0.0.1.0",
+    "Description":  "Read-only inspector for loaded character models, materials and candidate ID textures. Exact colorset row identification is planned for later development.",
+    "Punchline":  "Inspect the materials behind your outfit.",
+    "Changelog":  "Initial testing-only build.",
+    "TestingChangelog":  "DEV1: Actor resource scanning, Penumbra V5 integration, optional Glamourer state check, equipment-slot grouping, diagnostic paths and clipboard export.",
+    "ApplicableVersion":  "any",
+    "Tags":  [
+                 "glamour",
+                 "dye",
+                 "materials",
+                 "utility"
+             ],
+    "DalamudApiLevel":  15,
+    "TestingDalamudApiLevel":  15,
+    "LoadRequiredState":  0,
+    "LoadSync":  false,
+    "CanUnloadAsync":  false,
+    "LoadPriority":  0,
+    "AcceptsFeedback":  false,
+    "IsHide":  false,
+    "IsTestingExclusive":  true,
+    "DownloadLinkInstall":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
+    "DownloadLinkUpdate":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
+    "DownloadLinkTesting":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
+    "LastUpdate":  1794622685
 }
 ]
