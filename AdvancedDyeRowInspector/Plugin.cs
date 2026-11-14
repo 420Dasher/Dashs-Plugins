@@ -839,8 +839,8 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector — DEV3 FIX2");
-        sb.AppendLine("Version: 0.0.3.2");
+        sb.AppendLine("Advanced Dye Row Inspector - DEV5");
+        sb.AppendLine("Version: 0.0.3.8");
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
         sb.AppendLine("Object index: " + actorIndex);
@@ -913,6 +913,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
         sb.AppendLine();
         AppendUvDiagnostics(sb);
+        AppendMaterialAuditDiagnostics(sb);
         sb.AppendLine("[FLAT PENUMBRA RESOURCE SNAPSHOT]");
 
         foreach (var item in flat)

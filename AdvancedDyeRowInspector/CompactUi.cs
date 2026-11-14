@@ -305,6 +305,8 @@ public sealed partial class Plugin
 
         DrawMeshIssueDiagnostics();
 
+        DrawMaterialAudit(selectedModels);
+
         ImGui.Checkbox(
             "Compare 3D area-weighted rows",
             ref compareSurfaceArea);
@@ -413,7 +415,7 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "v0.0.3.7  |  Experimental UV analysis");
+            "v0.0.3.8  |  Experimental UV analysis");
 
         ImGui.Spacing();
 
