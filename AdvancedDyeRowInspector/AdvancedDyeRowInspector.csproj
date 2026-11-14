@@ -1,9 +1,9 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
-    <Version>0.0.3.10</Version>
-    <AssemblyVersion>0.0.3.10</AssemblyVersion>
-    <FileVersion>0.0.3.10</FileVersion>
+    <Version>0.0.3.11</Version>
+    <AssemblyVersion>0.0.3.11</AssemblyVersion>
+    <FileVersion>0.0.3.11</FileVersion>
     <AssemblyName>AdvancedDyeRowInspector</AssemblyName>
     <RootNamespace>AdvancedDyeRowInspector</RootNamespace>
     <Name>AdvancedDyeRowInspector</Name>
@@ -11,6 +11,7 @@
     <Description>Read-only character model, material and ID texture inspector.</Description>
     <Punchline>Inspect the materials behind your outfit.</Punchline>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <DalamudApiLevel>15</DalamudApiLevel>

@@ -546,6 +546,8 @@ public sealed partial class Plugin
 
         DrawRuntimeMaterialBindings(materials);
 
+        DrawPreviewTargetResolver(materials, selectedModels);
+
         ImGui.Spacing();
 
         ImGui.TextDisabled(
