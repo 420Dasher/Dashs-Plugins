@@ -13,7 +13,7 @@ public sealed partial class Plugin
     private string compactSlot = "Legs";
     private bool compactAdvanced;
     private bool compactShowMoreRows;
-    private bool compareSurfaceArea;
+
 
     // Use the actual Dalamud theme.
     // No hardcoded colors or plugin-global ImGui overrides.
@@ -133,8 +133,6 @@ public sealed partial class Plugin
         ImGui.Separator();
 
         ImGui.TextUnformatted(compactSlot);
-        ImGui.SameLine();
-        ImGui.TextDisabled("Experimental UV analysis");
 
         ImGui.TextDisabled(
             "Material: " + FriendlyMaterialName(material.GamePath));
@@ -251,8 +249,7 @@ public sealed partial class Plugin
         ImGui.TextDisabled(
             "UV sample influence, not confirmed on-screen visibility.");
 
-        if (compareSurfaceArea)
-            DrawSurfaceAreaComparison(report, index);
+
     }
 
     private void DrawCompactAdvanced(
@@ -265,7 +262,9 @@ public sealed partial class Plugin
 
         ImGui.TextDisabled("Advanced inspection");
 
-        ImGui.Checkbox("Show paths", ref showPaths);
+        if (ImGui.TreeNode("Display / sampling options"))
+        {
+            ImGui.Checkbox("Show paths", ref showPaths);
         ImGui.SameLine();
         ImGui.Checkbox("Outfit only", ref outfitOnly);
 
@@ -295,6 +294,9 @@ public sealed partial class Plugin
             "Flip UV V (rescan required)",
             ref flipUvV);
 
+            ImGui.TreePop();
+        }
+
         ImGui.TextDisabled(
             $"Geometry: {uvProcessedModels}/{uvTotalModels} models, " +
             $"{uvMatchedMeshes} matched meshes, " +
@@ -307,18 +309,15 @@ public sealed partial class Plugin
 
         DrawMaterialAudit(selectedModels);
 
-        ImGui.Checkbox(
-            "Compare 3D area-weighted rows",
-            ref compareSurfaceArea);
 
-        ImGui.TextWrapped(
-            $"Penumbra: {treeStatus}");
 
-        ImGui.TextWrapped(
-            $"Resource paths: {pathStatus}");
-
-        ImGui.TextWrapped(
-            $"Glamourer: {glamourerStatus}");
+        if (ImGui.TreeNode("Connection details"))
+        {
+            ImGui.TextWrapped($"Penumbra: {treeStatus}");
+            ImGui.TextWrapped($"Resource paths: {pathStatus}");
+            ImGui.TextWrapped($"Glamourer: {glamourerStatus}");
+            ImGui.TreePop();
+        }
 
         if (ImGui.Button("Copy full diagnostics"))
             ImGui.SetClipboardText(MakeDiagnostics());
@@ -337,9 +336,7 @@ public sealed partial class Plugin
         if (showRaw)
             DrawRaw();
 
-        ImGui.Spacing();
-        ImGui.TextDisabled(
-            "Theme follows the active Dalamud ImGui style.");
+
     }
 
     // Fit the actual content to the available display.
@@ -415,7 +412,7 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "v0.0.3.8  |  Experimental UV analysis");
+            "v0.0.3.9  |  Experimental UV analysis");
 
         ImGui.Spacing();
 

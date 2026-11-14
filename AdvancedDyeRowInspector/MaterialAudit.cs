@@ -14,6 +14,7 @@ public sealed partial class Plugin
     // g_SamplerIndex -- index/ID texture sampler.
     // Verified against Penumbra.GameData's shader IDs.
     private const uint IndexSamplerId = 0x565F8FD8u;
+    private const uint NormalSamplerId = 0x0C5EC1F1u;
 
     private sealed class MaterialAudit
     {
@@ -22,6 +23,10 @@ public sealed partial class Plugin
         public string Status = "";
         public string Evidence = "";
         public int DatasetBytes;
+        public readonly List<string> SamplerBindings = new();
+        public string NormalTexture = "";
+        public string DerivedIndexCandidate = "";
+        public string CandidateStatus = "";
         public bool IndexDeclared;
         public bool TreePathMatched;
         public bool ReadSucceeded;
@@ -76,6 +81,150 @@ public sealed partial class Plugin
             : cleaned[(last + 1)..];
     }
 
+    private static string SamplerRole(uint id)
+    {
+        return id switch
+        {
+            IndexSamplerId  => "Index",
+            NormalSamplerId => "Normal",
+            0x8A4E82B6u   => "Mask",
+            0x115306BEu   => "Diffuse",
+            0x2B99E025u   => "Specular",
+            _             => "Unknown"
+        };
+    }
+
+    // Diagnostic candidate logic only.
+    // Mirrors common normal/index naming conventions
+    // without claiming an actual shader binding.
+    private static string CandidateIndexPath(string normal)
+    {
+        string path = AuditPath(normal);
+
+        if (path.EndsWith(
+            "_norm.tex", StringComparison.OrdinalIgnoreCase))
+            return path[..^9] + "_id.tex";
+
+        if (path.EndsWith(
+            "_n.tex", StringComparison.OrdinalIgnoreCase))
+            return path[..^6] + "_id.tex";
+
+        return "";
+    }
+
+    private void InspectSamplerBindings(
+        MtrlFile mtrl,
+        MaterialEntry material,
+        MaterialAudit audit)
+    {
+        foreach (var sampler in mtrl.Samplers)
+        {
+            string path;
+
+            if (sampler.TextureIndex >=
+                mtrl.TextureOffsets.Length)
+            {
+                path = "(invalid texture index)";
+            }
+            else
+            {
+                int offset = mtrl.TextureOffsets[
+                    sampler.TextureIndex].Offset;
+
+                try
+                {
+                    path = AuditString(mtrl.Strings, offset);
+                }
+                catch (Exception ex)
+                {
+                    path = "(invalid texture path: " +
+                        ex.Message + ")";
+                }
+            }
+
+            audit.SamplerBindings.Add(
+                $"0x{sampler.SamplerId:X8} " +
+                $"{SamplerRole(sampler.SamplerId)} -> {path}");
+        }
+
+        // This is a separate heuristic. Do not use it to
+        // override an explicitly declared index sampler.
+        if (mtrl.Samplers.Any(
+            sampler => sampler.SamplerId == IndexSamplerId))
+            return;
+
+        var normal = mtrl.Samplers
+            .Where(s => s.SamplerId == NormalSamplerId)
+            .ToArray();
+
+        if (normal.Length != 1)
+        {
+            audit.CandidateStatus = normal.Length == 0
+                ? "No normal sampler available for fallback analysis."
+                : "Normal sampler declaration is ambiguous.";
+            return;
+        }
+
+        int index = normal[0].TextureIndex;
+
+        if (index >= mtrl.TextureOffsets.Length)
+        {
+            audit.CandidateStatus =
+                "Normal sampler texture index is invalid.";
+            return;
+        }
+
+        try
+        {
+            audit.NormalTexture = AuditString(
+                mtrl.Strings,
+                mtrl.TextureOffsets[index].Offset);
+        }
+        catch (Exception ex)
+        {
+            audit.CandidateStatus =
+                "Cannot read normal map path: " + ex.Message;
+            return;
+        }
+
+        audit.DerivedIndexCandidate =
+            CandidateIndexPath(audit.NormalTexture);
+
+        if (audit.DerivedIndexCandidate.Length == 0)
+        {
+            audit.CandidateStatus =
+                "Normal texture name does not provide " +
+                "a conventional ID candidate.";
+            return;
+        }
+
+        var matches = material.Textures
+            .Where(t => !string.IsNullOrWhiteSpace(t.GamePath))
+            .Where(t => string.Equals(
+                AuditPath(t.GamePath),
+                audit.DerivedIndexCandidate,
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        if (matches.Length == 0)
+        {
+            audit.CandidateStatus =
+                "Candidate not found in this material's " +
+                "Penumbra resource subtree.";
+            return;
+        }
+
+        int resolutions = matches
+            .Select(t => AuditPath(t.ActualPath))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+
+        audit.CandidateStatus = resolutions == 1
+            ? "Candidate exists in Penumbra's resource tree. " +
+              "Actual shader usage remains UNVERIFIED."
+            : "Candidate has ambiguous Penumbra resolutions. " +
+              "Actual shader usage remains UNVERIFIED.";
+    }
     private MaterialAudit InspectMaterialFile(
         MaterialEntry material)
     {
@@ -141,6 +290,8 @@ public sealed partial class Plugin
                 mtrl.Strings,
                 mtrl.FileHeader.ShaderPackageNameOffset);
 
+            InspectSamplerBindings(mtrl, material, audit);
+
             var samplers = mtrl.Samplers
                 .Where(s => s.SamplerId == IndexSamplerId)
                 .ToArray();
@@ -148,11 +299,11 @@ public sealed partial class Plugin
             if (samplers.Length == 0)
             {
                 audit.Status =
-                    "No index sampler declared by this material.";
+                    "No explicit index sampler declared.";
 
                 audit.Evidence =
-                    "Filename-based ID texture detection " +
-                    "cannot verify shader usage.";
+                    "Any normal-map-derived ID candidate is " +
+                    "diagnostic only, not confirmed shader usage.";
 
                 return audit;
             }
@@ -360,6 +511,33 @@ public sealed partial class Plugin
                     audit.IndexTexture);
             }
 
+            if (!string.IsNullOrWhiteSpace(audit.NormalTexture))
+            {
+                ImGui.TextWrapped(
+                    "Normal map: " + audit.NormalTexture);
+            }
+
+            if (!string.IsNullOrWhiteSpace(
+                audit.DerivedIndexCandidate))
+            {
+                ImGui.TextWrapped(
+                    "Possible ID map: " +
+                    audit.DerivedIndexCandidate);
+            }
+
+            if (!string.IsNullOrWhiteSpace(audit.CandidateStatus))
+                ImGui.TextWrapped(audit.CandidateStatus);
+
+            if (ImGui.TreeNode(
+                $"Sampler bindings ({audit.SamplerBindings.Count})" +
+                $"##samplers_{material.GamePath}_{material.ActualPath}"))
+            {
+                foreach (string binding in audit.SamplerBindings)
+                    ImGui.TextWrapped(binding);
+
+                ImGui.TreePop();
+            }
+
             ImGui.TextWrapped(audit.Status);
 
             if (!string.IsNullOrWhiteSpace(audit.Evidence))
@@ -417,6 +595,20 @@ public sealed partial class Plugin
             sb.AppendLine(
                 "DATASET BYTES: " +
                 entry.Value.DatasetBytes);
+
+            sb.AppendLine(
+                "NORMAL MAP: " + entry.Value.NormalTexture);
+
+            sb.AppendLine(
+                "DERIVED INDEX CANDIDATE: " +
+                entry.Value.DerivedIndexCandidate);
+
+            sb.AppendLine(
+                "CANDIDATE STATUS: " +
+                entry.Value.CandidateStatus);
+
+            foreach (string binding in entry.Value.SamplerBindings)
+                sb.AppendLine("SAMPLER: " + binding);
 
             sb.AppendLine(
                 "STATUS: " + entry.Value.Status);
