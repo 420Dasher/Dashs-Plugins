@@ -180,11 +180,11 @@
     "Name":  "AdvancedDyeRowInspector",
     "InternalName":  "AdvancedDyeRowInspector",
     "AssemblyVersion":  "0.0.0.0",
-    "TestingAssemblyVersion":  "0.0.2.1",
+    "TestingAssemblyVersion":  "0.0.3.0",
     "Description":  "Read-only inspector for loaded character models, materials and candidate ID textures. Exact colorset row identification is planned for later development.",
     "Punchline":  "Inspect the materials behind your outfit.",
     "Changelog":  "Initial testing-only build.",
-    "TestingChangelog":  "DEV2 FIX1: Separate outfit/body dependencies, rank ID-texture rows by coverage, count exact/near/off-grid pixels, identify shared sources and retain full diagnostics. UV-visible rows remain unverified.",
+    "TestingChangelog":  "DEV3 experimental: decode high-LOD mesh/material bindings and sample UV0 triangles against linked ID textures. Partial and unsupported matches are explicitly reported; UV samples are not proof of visible rows.",
     "ApplicableVersion":  "any",
     "Tags":  [
                  "glamour",
@@ -204,6 +204,6 @@
     "DownloadLinkInstall":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkUpdate":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkTesting":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
-    "LastUpdate":  1794625033
+    "LastUpdate":  1794681237
 }
 ]
