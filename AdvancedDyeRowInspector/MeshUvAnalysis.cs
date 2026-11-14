@@ -28,6 +28,13 @@ public sealed partial class Plugin
         public bool Capped;
 
         public readonly double[] Weights = new double[32];
+
+        // Experimental comparison only.
+        public readonly double[] SurfaceWeights = new double[32];
+        public double SurfaceCleanWeight;
+        public int SurfaceWeightedTriangles;
+        public int SurfaceUnavailableTriangles;
+        public string SurfaceStatus = "";
     }
 
     private sealed class TexturePixels
@@ -186,6 +193,7 @@ public sealed partial class Plugin
         public string MaterialName = "";
         public Vector2?[] Uvs = Array.Empty<Vector2?>();
         public ushort[] Indices = Array.Empty<ushort>();
+        public Vector3?[] SurfacePositions = Array.Empty<Vector3?>();
     }
 
     private readonly Queue<ModelEntry> pendingUvModels = new();
@@ -546,6 +554,22 @@ public sealed partial class Plugin
                         uvPixelCache,
                         ref uvCacheBytes);
 
+                    try
+                    {
+                        raw.SurfacePositions = ReadSurfacePositions(
+                            mdl, meshIndex);
+                    }
+                    catch (Exception areaEx)
+                    {
+                        if (string.IsNullOrWhiteSpace(
+                            report.SurfaceStatus))
+                        {
+                            report.SurfaceStatus =
+                                "3D position comparison unavailable: " +
+                                areaEx.Message;
+                        }
+                    }
+
                     SampleMesh(raw, pixels, report);
 
                     linked++;
@@ -865,6 +889,38 @@ public sealed partial class Plugin
             Vector2 b = vertices[i1]!.Value;
             Vector2 c = vertices[i2]!.Value;
 
+            // The original seven UV samples remain identical.
+            // Only the alternative ranking receives this weight.
+            double triangleArea = 0.0;
+            var positions = mesh.SurfacePositions;
+
+            if (i0 < positions.Length &&
+                i1 < positions.Length &&
+                i2 < positions.Length &&
+                positions[i0].HasValue &&
+                positions[i1].HasValue &&
+                positions[i2].HasValue)
+            {
+                Vector3 p0 = positions[i0]!.Value;
+                Vector3 p1 = positions[i1]!.Value;
+                Vector3 p2 = positions[i2]!.Value;
+
+                float crossLength = Vector3.Cross(
+                    p1 - p0,
+                    p2 - p0).Length();
+
+                if (float.IsFinite(crossLength) &&
+                    crossLength > 0f)
+                {
+                    triangleArea = 0.5 * crossLength;
+                }
+            }
+
+            if (triangleArea > 0.0)
+                report.SurfaceWeightedTriangles++;
+            else
+                report.SurfaceUnavailableTriangles++;
+
             foreach (var w in BarycentricSamples)
             {
                 float u =
@@ -877,7 +933,7 @@ public sealed partial class Plugin
                     b.Y * w.Y +
                     c.Y * w.Z;
 
-                SampleUv(u, v, tex, report);
+                SampleUv(u, v, tex, report, triangleArea / BarycentricSamples.Length);
             }
 
             report.Triangles++;
@@ -889,7 +945,8 @@ public sealed partial class Plugin
         float u,
         float v,
         TexturePixels tex,
-        UvReport report)
+        UvReport report,
+        double surfaceWeight)
     {
         // Experimental UV0 XY sampling.
         // Uses repeating address mode and point sampling.
@@ -931,6 +988,19 @@ public sealed partial class Plugin
         report.Weights[pair * 2] += green / 255.0;
         report.Weights[pair * 2 + 1] +=
             (255 - green) / 255.0;
+
+        // Separate area-weighted result.
+        // Does not change the baseline row percentages.
+        if (surfaceWeight > 0.0)
+        {
+            report.SurfaceCleanWeight += surfaceWeight;
+
+            report.SurfaceWeights[pair * 2] +=
+                surfaceWeight * green / 255.0;
+
+            report.SurfaceWeights[pair * 2 + 1] +=
+                surfaceWeight * (255 - green) / 255.0;
+        }
     }
 
     private IEnumerable<(string Row, double Percent)>

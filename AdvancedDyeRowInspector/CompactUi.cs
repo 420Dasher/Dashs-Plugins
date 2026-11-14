@@ -13,6 +13,7 @@ public sealed partial class Plugin
     private string compactSlot = "Legs";
     private bool compactAdvanced;
     private bool compactShowMoreRows;
+    private bool compareSurfaceArea;
 
     // Use the actual Dalamud theme.
     // No hardcoded colors or plugin-global ImGui overrides.
@@ -249,6 +250,9 @@ public sealed partial class Plugin
         ImGui.Spacing();
         ImGui.TextDisabled(
             "UV sample influence, not confirmed on-screen visibility.");
+
+        if (compareSurfaceArea)
+            DrawSurfaceAreaComparison(report, index);
     }
 
     private void DrawCompactAdvanced(
@@ -300,6 +304,10 @@ public sealed partial class Plugin
             $"Triangles sampled: {uvTriangles:N0}");
 
         DrawMeshIssueDiagnostics();
+
+        ImGui.Checkbox(
+            "Compare 3D area-weighted rows",
+            ref compareSurfaceArea);
 
         ImGui.TextWrapped(
             $"Penumbra: {treeStatus}");
@@ -367,7 +375,7 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "v0.0.3.5  |  Experimental UV analysis");
+            "v0.0.3.6  |  Experimental UV analysis");
 
         ImGui.Spacing();
 
