@@ -1,0 +1,20 @@
+{
+    "Author":  "Dash + AI",
+    "Name":  "AdvancedDyeRowInspector",
+    "InternalName":  "AdvancedDyeRowInspector",
+    "AssemblyVersion":  "0.0.1.0",
+    "DalamudApiLevel":  15,
+    "ApplicableVersion":  "any",
+    "LoadRequiredState":  0,
+    "LoadSync":  false,
+    "CanUnloadAsync":  false,
+    "LoadPriority":  0,
+    "Punchline":  "Inspect the materials behind your outfit.",
+    "Description":  "Read-only inspection of loaded models, materials and ID texture candidates. Exact colorset decoding is not available in DEV1.",
+    "Tags":  [
+                 "glamour",
+                 "dye",
+                 "materials",
+                 "utility"
+             ]
+}
