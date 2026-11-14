@@ -412,7 +412,7 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "v0.0.3.11  |  Experimental UV analysis");
+            "v0.0.3.12  |  Experimental UV analysis");
 
         ImGui.Spacing();
 

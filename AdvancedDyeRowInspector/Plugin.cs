@@ -35,6 +35,9 @@ public sealed partial class Plugin : IDalamudPlugin
     [PluginService]
     private static IPluginLog Log { get; set; } = null!;
 
+    [PluginService]
+    private static IFramework Framework { get; set; } = null!;
+
     // Confirmed Penumbra API V5 signatures.
     private readonly ICallGateSubscriber<
         bool, ushort[], JObject?[]> treeIpc;
@@ -180,6 +183,8 @@ public sealed partial class Plugin : IDalamudPlugin
         Pi.UiBuilder.OpenMainUi += Open;
         Pi.UiBuilder.OpenConfigUi += Open;
 
+        Framework.Update += OnLivePreviewFramework;
+
         Log.Information("Advanced Dye Row Inspector DEV2 initialized.");
     }
 
@@ -195,6 +200,9 @@ public sealed partial class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        Framework.Update -= OnLivePreviewFramework;
+        EndLivePreview("Plugin unloaded.");
+
         Commands.RemoveHandler("/adri");
         Pi.UiBuilder.Draw -= Draw;
         Pi.UiBuilder.OpenMainUi -= Open;
@@ -738,6 +746,8 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void Scan()
     {
+        EndLivePreview("Stopped by rescan.");
+
         scanned = true;
         scanTime = DateTime.Now;
 
@@ -845,8 +855,8 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector - DEV6");
-        sb.AppendLine("Version: 0.0.3.11");
+        sb.AppendLine("Advanced Dye Row Inspector - DEV6 STAGE 2");
+        sb.AppendLine("Version: 0.0.3.12");
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
         sb.AppendLine("Object index: " + actorIndex);
@@ -922,6 +932,7 @@ public sealed partial class Plugin : IDalamudPlugin
         AppendMaterialAuditDiagnostics(sb);
         AppendRuntimeMaterialDiagnostics(sb);
         AppendPreviewTargetDiagnostics(sb);
+        AppendLivePreviewDiagnostics(sb);
         sb.AppendLine("[FLAT PENUMBRA RESOURCE SNAPSHOT]");
 
         foreach (var item in flat)
