@@ -7,7 +7,7 @@ using System.Text;
 
 using Dalamud.Bindings.ImGui;
 using Lumina.Data.Files;
-using Lumina.Models.Models;
+using System.Text;
 
 namespace AdvancedDyeRowInspector;
 
@@ -179,169 +179,481 @@ public sealed partial class Plugin
     // MESH ANALYSIS
     // ======================================================
 
+    // Direct UV reader avoids Lumina.Models.Mesh.GetVector4.
+    // We still rely on Lumina's MdlFile container parsing.
+
+    private sealed class RawUvMesh
+    {
+        public string MaterialName = "";
+        public Vector2?[] Uvs = Array.Empty<Vector2?>();
+        public ushort[] Indices = Array.Empty<ushort>();
+    }
+
+    private readonly Queue<ModelEntry> pendingUvModels = new();
+
+    private readonly Dictionary<string, TexturePixels> uvPixelCache =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private long uvCacheBytes;
+    private int uvTotalModels;
+    private int uvProcessedModels;
+
     private void AnalyzeGeometry()
     {
+        // This is called after the Penumbra resource scan.
+        // Queue work rather than parsing all models inside
+        // the Scan button's ImGui callback.
+
         uvReports.Clear();
         uvModelStatus.Clear();
+        pendingUvModels.Clear();
+        uvPixelCache.Clear();
 
+        uvCacheBytes = 0;
         uvMatchedModels = 0;
         uvMatchedMeshes = 0;
         uvUnmatchedMeshes = 0;
         uvTriangles = 0;
+        uvProcessedModels = 0;
 
-        long cacheBytes = 0;
+        foreach (var model in models.Where(x => x.IsOutfit))
+            pendingUvModels.Enqueue(model);
 
-        var images = new Dictionary<string, TexturePixels>(
-            StringComparer.OrdinalIgnoreCase);
+        uvTotalModels = pendingUvModels.Count;
+    }
+
+    private void ProcessGeometryStep()
+    {
+        if (pendingUvModels.Count == 0)
+            return;
+
+        // Exactly one model per UI frame.
+        var model = pendingUvModels.Dequeue();
 
         try
         {
-            foreach (var model in models.Where(x => x.IsOutfit))
+            var mdl = LoadModelFile(model);
+
+            if (mdl == null)
             {
+                uvModelStatus[model] = "MDL unavailable";
+                return;
+            }
+
+            if (mdl.Data == null ||
+                mdl.Data.Length > 64L * 1024 * 1024)
+            {
+                uvModelStatus[model] =
+                    "MDL unavailable or exceeds 64 MiB";
+                return;
+            }
+
+            if (mdl.Lods == null ||
+                mdl.Lods.Length == 0 ||
+                mdl.Meshes == null)
+            {
+                uvModelStatus[model] =
+                    "No usable model LOD or mesh records";
+                return;
+            }
+
+            var lod = mdl.Lods[0];
+
+            int first = lod.MeshIndex;
+            int end = first + lod.MeshCount;
+
+            if (first < 0 ||
+                end > mdl.Meshes.Length ||
+                end < first)
+            {
+                uvModelStatus[model] =
+                    "Invalid high-LOD mesh range";
+                return;
+            }
+
+            int linked = 0;
+            int skipped = 0;
+
+            var failures = new List<string>();
+
+            for (int meshIndex = first;
+                 meshIndex < end;
+                 meshIndex++)
+            {
+                if (uvTriangles >= 60000)
+                {
+                    failures.Add(
+                        "Global 60,000 triangle limit reached");
+                    break;
+                }
+
+                RawUvMesh raw;
+
                 try
                 {
-                    var mdl = LoadModelFile(model);
-
-                    if (mdl == null)
-                    {
-                        uvModelStatus[model] = "MDL unavailable";
-                        continue;
-                    }
-
-                    if (mdl.Data.Length > 64L * 1024 * 1024)
-                    {
-                        uvModelStatus[model] =
-                            "MDL exceeds safety limit";
-                        continue;
-                    }
-
-                    var parsed = new Model(
-                        mdl, Model.ModelLod.High);
-
-                    if (parsed.Meshes == null)
-                    {
-                        uvModelStatus[model] = "No parsed meshes";
-                        continue;
-                    }
-
-                    int linked = 0;
-                    int unmatched = 0;
-
-                    foreach (var mesh in parsed.Meshes)
-                    {
-                        if (!mesh.Types.Contains(Mesh.MeshType.Main))
-                            continue;
-
-                        string meshMatName = BaseName(
-                            mesh.Material.MaterialPath ?? "");
-
-                        var matches = model.Materials
-                            .Where(IsOutfitMaterial)
-                            .Where(m =>
-                                string.Equals(
-                                    BaseName(m.GamePath),
-                                    meshMatName,
-                                    StringComparison.OrdinalIgnoreCase))
-                            .ToList();
-
-                        if (matches.Count != 1)
-                        {
-                            unmatched++;
-                            uvUnmatchedMeshes++;
-                            continue;
-                        }
-
-                        var material = matches[0];
-
-                        var ids = material.Textures
-                            .Where(t =>
-                                t.IsId &&
-                                t.Decoded?.Success == true)
-                            .GroupBy(
-                                t => string.IsNullOrWhiteSpace(
-                                    t.ActualPath)
-                                    ? t.GamePath
-                                    : t.ActualPath,
-                                StringComparer.OrdinalIgnoreCase)
-                            .Select(g => g.First())
-                            .ToList();
-
-                        if (ids.Count != 1)
-                        {
-                            unmatched++;
-                            uvUnmatchedMeshes++;
-                            continue;
-                        }
-
-                        if (!uvReports.TryGetValue(
-                            material, out var report))
-                        {
-                            report = new UvReport
-                            {
-                                Texture = ids[0].GamePath
-                            };
-
-                            uvReports.Add(material, report);
-                        }
-
-                        try
-                        {
-                            var pixels = LoadIdPixels(
-                                ids[0], images, ref cacheBytes);
-
-                            SampleMesh(mesh, pixels, report);
-
-                            linked++;
-                            report.Meshes++;
-                            uvMatchedMeshes++;
-                        }
-                        catch (Exception ex)
-                        {
-                            report.Status = ex.Message;
-                            unmatched++;
-                            uvUnmatchedMeshes++;
-                        }
-                    }
-
-                    if (linked > 0)
-                        uvMatchedModels++;
-
-                    uvModelStatus[model] =
-                        $"{linked} mesh(es) matched; " +
-                        $"{unmatched} unmatched/skipped";
+                    raw = ReadUvMesh(mdl, meshIndex);
                 }
                 catch (Exception ex)
                 {
-                    uvModelStatus[model] =
-                        "Parse failed: " +
-                        ex.GetType().Name +
-                        ": " + ex.Message;
+                    skipped++;
+                    uvUnmatchedMeshes++;
 
-                    Log.Warning(
-                        $"ADRI DEV3 model parse failed: {ex}");
+                    if (failures.Count < 5)
+                    {
+                        failures.Add(
+                            $"Mesh {meshIndex}: {ex.Message}");
+                    }
+
+                    continue;
+                }
+
+                var matches = model.Materials
+                    .Where(IsOutfitMaterial)
+                    .Where(m => string.Equals(
+                        BaseName(m.GamePath),
+                        raw.MaterialName,
+                        StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (matches.Count != 1)
+                {
+                    skipped++;
+                    uvUnmatchedMeshes++;
+
+                    if (failures.Count < 5)
+                    {
+                        failures.Add(
+                            $"Mesh {meshIndex}: material " +
+                            $"'{raw.MaterialName}' has " +
+                            $"{matches.Count} matches");
+                    }
+
+                    continue;
+                }
+
+                var material = matches[0];
+
+                var ids = material.Textures
+                    .Where(t => t.IsId &&
+                        t.Decoded?.Success == true)
+                    .GroupBy(
+                        t => string.IsNullOrWhiteSpace(
+                            t.ActualPath)
+                            ? t.GamePath
+                            : t.ActualPath,
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(g => g.First())
+                    .ToList();
+
+                if (ids.Count != 1)
+                {
+                    skipped++;
+                    uvUnmatchedMeshes++;
+
+                    if (failures.Count < 5)
+                    {
+                        failures.Add(
+                            $"Mesh {meshIndex}: " +
+                            $"{ids.Count} matching ID textures");
+                    }
+
+                    continue;
+                }
+
+                if (!uvReports.TryGetValue(
+                    material, out var report))
+                {
+                    report = new UvReport
+                    {
+                        Texture = ids[0].GamePath
+                    };
+
+                    uvReports.Add(material, report);
+                }
+
+                try
+                {
+                    var pixels = LoadIdPixels(
+                        ids[0],
+                        uvPixelCache,
+                        ref uvCacheBytes);
+
+                    SampleMesh(raw, pixels, report);
+
+                    linked++;
+                    report.Meshes++;
+                    uvMatchedMeshes++;
+                }
+                catch (Exception ex)
+                {
+                    report.Status = ex.Message;
+                    skipped++;
+                    uvUnmatchedMeshes++;
+
+                    if (failures.Count < 5)
+                    {
+                        failures.Add(
+                            $"Mesh {meshIndex}: {ex.Message}");
+                    }
                 }
             }
+
+            if (linked > 0)
+                uvMatchedModels++;
+
+            uvModelStatus[model] =
+                $"{linked} matched mesh(es), " +
+                $"{skipped} skipped. " +
+                string.Join(" | ", failures);
+        }
+        catch (Exception ex)
+        {
+            uvModelStatus[model] =
+                "Model processing failed: " +
+                ex.GetType().Name + ": " + ex.Message;
+
+            Log.Warning(
+                $"ADRI DEV3 FIX1 model processing failed: {ex}");
         }
         finally
         {
-            images.Clear();
+            uvProcessedModels++;
+
+            // Discard temporary decoded texture buffers
+            // once the final model is processed.
+            if (pendingUvModels.Count == 0)
+            {
+                uvPixelCache.Clear();
+                uvCacheBytes = 0;
+            }
         }
     }
 
+    private static string ReadMaterialName(
+        MdlFile mdl, int materialIndex)
+    {
+        if (materialIndex < 0 ||
+            materialIndex >= mdl.MaterialNameOffsets.Length)
+        {
+            throw new InvalidDataException(
+                "Material index outside model table");
+        }
+
+        int offset = checked(
+            (int)mdl.MaterialNameOffsets[materialIndex]);
+
+        byte[] strings = mdl.Strings;
+
+        if (offset < 0 || offset >= strings.Length)
+        {
+            throw new InvalidDataException(
+                "Material name offset invalid");
+        }
+
+        int end = Array.IndexOf(
+            strings, (byte)0, offset);
+
+        if (end < 0)
+        {
+            throw new InvalidDataException(
+                "Material name is not terminated");
+        }
+
+        string path = Encoding.UTF8.GetString(
+            strings, offset, end - offset);
+
+        return BaseName(path);
+    }
+
+    private static RawUvMesh ReadUvMesh(
+        MdlFile mdl,
+        int meshIndex)
+    {
+        if (meshIndex < 0 ||
+            meshIndex >= mdl.Meshes.Length ||
+            meshIndex >= mdl.VertexDeclarations.Length)
+        {
+            throw new InvalidDataException(
+                "Mesh/declaration index invalid");
+        }
+
+        var mesh = mdl.Meshes[meshIndex];
+        var declaration = mdl.VertexDeclarations[meshIndex];
+
+        if (mesh.VertexCount == 0 ||
+            mesh.IndexCount < 3 ||
+            mesh.IndexCount > 240000)
+        {
+            throw new InvalidDataException(
+                "Mesh has unsupported vertex/index count");
+        }
+
+        // Read UV usage index zero only.
+        // Other attributes are irrelevant to ADRI.
+        var uvElements = declaration.VertexElements
+            .Where(e => e.Usage == 4 && e.UsageIndex == 0)
+            .ToArray();
+
+        if (uvElements.Length != 1)
+        {
+            throw new InvalidDataException(
+                $"Expected one UV0 element, found {uvElements.Length}");
+        }
+
+        var uv = uvElements[0];
+
+        int byteSize = uv.Type switch
+        {
+            1 => 8,   // Float2
+            2 => 12,  // Float3
+            3 => 16,  // Float4
+            8 => 4,   // Normalized byte4
+            13 => 4,  // Half2
+            14 => 8,  // Half4
+            _ => 0
+        };
+
+        if (byteSize == 0)
+        {
+            throw new InvalidDataException(
+                $"Unsupported UV0 vertex type {uv.Type}");
+        }
+
+        int stream = uv.Stream;
+
+        if (stream < 0 ||
+            stream >= 3 ||
+            stream >= mesh.VertexStreamCount)
+        {
+            throw new InvalidDataException(
+                "UV vertex stream index invalid");
+        }
+
+        int stride = mesh.VertexBufferStride[stream];
+
+        if (stride <= 0 ||
+            uv.Offset + byteSize > stride)
+        {
+            throw new InvalidDataException(
+                "Invalid UV stride or offset");
+        }
+
+        byte[] data = mdl.Data;
+
+        long vertexStart =
+            mdl.FileHeader.VertexOffset[0];
+
+        long vertexEnd = vertexStart +
+            mdl.FileHeader.VertexBufferSize[0];
+
+        long streamStart = vertexStart +
+            mesh.VertexBufferOffset[stream];
+
+        if (vertexStart < 0 ||
+            vertexEnd > data.LongLength ||
+            streamStart < vertexStart ||
+            streamStart >= vertexEnd)
+        {
+            throw new InvalidDataException(
+                "Vertex buffer range invalid");
+        }
+
+        var result = new RawUvMesh
+        {
+            MaterialName = ReadMaterialName(
+                mdl, mesh.MaterialIndex),
+            Uvs = new Vector2?[mesh.VertexCount],
+            Indices = new ushort[checked((int)mesh.IndexCount)]
+        };
+
+        for (int i = 0; i < mesh.VertexCount; i++)
+        {
+            long position = streamStart +
+                (long)i * stride + uv.Offset;
+
+            if (position < vertexStart ||
+                position + byteSize > vertexEnd ||
+                position + byteSize > data.LongLength)
+            {
+                throw new InvalidDataException(
+                    "UV vertex data outside buffer");
+            }
+
+            int pos = checked((int)position);
+
+            float u;
+            float v;
+
+            switch (uv.Type)
+            {
+                case 1:
+                case 2:
+                case 3:
+                    u = BitConverter.ToSingle(data, pos);
+                    v = BitConverter.ToSingle(data, pos + 4);
+                    break;
+
+                case 13:
+                case 14:
+                    u = (float)BitConverter.UInt16BitsToHalf(
+                        BitConverter.ToUInt16(data, pos));
+
+                    v = (float)BitConverter.UInt16BitsToHalf(
+                        BitConverter.ToUInt16(data, pos + 2));
+                    break;
+
+                case 8:
+                    u = data[pos] / 255f;
+                    v = data[pos + 1] / 255f;
+                    break;
+
+                default:
+                    throw new InvalidDataException(
+                        "Unsupported UV data type");
+            }
+
+            if (float.IsFinite(u) &&
+                float.IsFinite(v))
+            {
+                result.Uvs[i] = new Vector2(u, v);
+            }
+        }
+
+        long indexStart =
+            mdl.FileHeader.IndexOffset[0] +
+            (long)mesh.StartIndex * 2;
+
+        long indexEnd =
+            mdl.FileHeader.IndexOffset[0] +
+            mdl.FileHeader.IndexBufferSize[0];
+
+        long requiredEnd =
+            indexStart + result.Indices.LongLength * 2;
+
+        if (indexStart < mdl.FileHeader.IndexOffset[0] ||
+            requiredEnd > indexEnd ||
+            requiredEnd > data.LongLength)
+        {
+            throw new InvalidDataException(
+                "Index data outside buffer");
+        }
+
+        for (int i = 0; i < result.Indices.Length; i++)
+        {
+            result.Indices[i] = BitConverter.ToUInt16(
+                data, checked((int)(indexStart + (long)i * 2)));
+        }
+
+        return result;
+    }
+
     private void SampleMesh(
-        Mesh mesh,
+        RawUvMesh mesh,
         TexturePixels tex,
         UvReport report)
     {
-        if (mesh.Vertices == null ||
-            mesh.Indices == null)
-        {
-            throw new InvalidOperationException(
-                "Mesh vertices or indices unavailable.");
-        }
-
         var indices = mesh.Indices;
-        var vertices = mesh.Vertices;
+        var vertices = mesh.Uvs;
 
         for (int n = 0; n + 2 < indices.Length; n += 3)
         {
@@ -358,28 +670,17 @@ public sealed partial class Plugin
             if (i0 >= vertices.Length ||
                 i1 >= vertices.Length ||
                 i2 >= vertices.Length ||
-                !vertices[i0].UV.HasValue ||
-                !vertices[i1].UV.HasValue ||
-                !vertices[i2].UV.HasValue)
+                !vertices[i0].HasValue ||
+                !vertices[i1].HasValue ||
+                !vertices[i2].HasValue)
             {
                 report.SkippedTriangles++;
                 continue;
             }
 
-            Vector4 a = vertices[i0].UV!.Value;
-            Vector4 b = vertices[i1].UV!.Value;
-            Vector4 c = vertices[i2].UV!.Value;
-
-            if (!float.IsFinite(a.X) ||
-                !float.IsFinite(a.Y) ||
-                !float.IsFinite(b.X) ||
-                !float.IsFinite(b.Y) ||
-                !float.IsFinite(c.X) ||
-                !float.IsFinite(c.Y))
-            {
-                report.SkippedTriangles++;
-                continue;
-            }
+            Vector2 a = vertices[i0]!.Value;
+            Vector2 b = vertices[i1]!.Value;
+            Vector2 c = vertices[i2]!.Value;
 
             foreach (var w in BarycentricSamples)
             {
@@ -556,6 +857,9 @@ public sealed partial class Plugin
 
     private void DrawUvControls()
     {
+        ImGui.TextDisabled(
+            $"Geometry scan: {uvProcessedModels}/{uvTotalModels} models processed; " +
+            $"{pendingUvModels.Count} pending.");
         ImGui.TextDisabled(
             "DEV3: experimental mesh UV0 sampling " +
             "(rescan after UV changes).");
