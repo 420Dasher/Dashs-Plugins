@@ -544,6 +544,8 @@ public sealed partial class Plugin
                 ImGui.TextWrapped(audit.Evidence);
         }
 
+        DrawRuntimeMaterialBindings(materials);
+
         ImGui.Spacing();
 
         ImGui.TextDisabled(

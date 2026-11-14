@@ -746,6 +746,9 @@ public sealed partial class Plugin : IDalamudPlugin
         flat.Clear();
         decodeCache.Clear();
 
+        runtimeMaterialEvidence.Clear();
+        runtimeBindingStatus = "Not checked.";
+
         nodeCount = 0;
         decodedCount = 0;
 
@@ -839,8 +842,8 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector - DEV5 FIX1");
-        sb.AppendLine("Version: 0.0.3.9");
+        sb.AppendLine("Advanced Dye Row Inspector - DEV5 FIX2");
+        sb.AppendLine("Version: 0.0.3.10");
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
         sb.AppendLine("Object index: " + actorIndex);
@@ -914,6 +917,7 @@ public sealed partial class Plugin : IDalamudPlugin
         sb.AppendLine();
         AppendUvDiagnostics(sb);
         AppendMaterialAuditDiagnostics(sb);
+        AppendRuntimeMaterialDiagnostics(sb);
         sb.AppendLine("[FLAT PENUMBRA RESOURCE SNAPSHOT]");
 
         foreach (var item in flat)
