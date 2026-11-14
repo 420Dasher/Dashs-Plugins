@@ -2,7 +2,7 @@
     "Author":  "Dash + AI",
     "Name":  "AdvancedDyeRowInspector",
     "InternalName":  "AdvancedDyeRowInspector",
-    "AssemblyVersion":  "0.0.2.0",
+    "AssemblyVersion":  "0.0.2.1",
     "DalamudApiLevel":  15,
     "ApplicableVersion":  "any",
     "LoadRequiredState":  0,
@@ -10,7 +10,7 @@
     "CanUnloadAsync":  false,
     "LoadPriority":  0,
     "Punchline":  "Inspect the materials behind your outfit.",
-    "Description":  "Read-only outfit model/material inspector with Penumbra resource-tree associations and ID-texture row decoding where supported.",
+    "Description":  "Read-only material and ID texture inspector with per-row coverage statistics, pixel-quality diagnostics and outfit dependency filtering.",
     "Tags":  [
                  "glamour",
                  "dye",

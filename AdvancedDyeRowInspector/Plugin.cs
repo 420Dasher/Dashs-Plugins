@@ -59,6 +59,9 @@ public sealed class Plugin : IDalamudPlugin
     private bool outfitOnly = true;
     private bool showPaths;
     private bool showRaw;
+    private bool showDependencies;
+    private bool showAllRows;
+    private float minimumCoverage = 0.25f;
 
     private string actorName = "Not scanned";
     private string actorIndex = "-";
@@ -126,13 +129,31 @@ public sealed class Plugin : IDalamudPlugin
         public string Kind = "";
     }
 
+    private sealed class RowStat
+    {
+        public string Row = "";
+        public long ExactHits;
+        public long NearHits;
+        public long OffGridHits;
+        public double ExactWeight;
+        public double NearWeight;
+        public double OffGridWeight;
+        public double StrictPercent;
+        public double OffGridPercent;
+
+        public double TotalPercent => StrictPercent + OffGridPercent;
+    }
+
     private sealed class DecodeResult
     {
         public bool Success;
         public string Detail = "";
         public string[] Rows = Array.Empty<string>();
+        public RowStat[] Stats = Array.Empty<RowStat>();
         public int Width;
         public int Height;
+        public int ExactPixels;
+        public int NearPixels;
         public int ApproximatePixels;
     }
 
@@ -271,7 +292,10 @@ public sealed class Plugin : IDalamudPlugin
 
     private DecodeResult Decode(string game, string actual)
     {
-        string key = game + "\n" + actual;
+        // Cache by resolved resource identity.
+        string key = !string.IsNullOrWhiteSpace(actual)
+            ? actual
+            : game;
 
         if (decodeCache.TryGetValue(key, out var cached))
             return cached;
@@ -281,8 +305,7 @@ public sealed class Plugin : IDalamudPlugin
 
         if (decodedCount >= 24)
         {
-            result.Detail =
-                "Scan safety limit reached (24 ID textures).";
+            result.Detail = "Scan safety limit reached (24 ID textures).";
             return result;
         }
 
@@ -290,15 +313,13 @@ public sealed class Plugin : IDalamudPlugin
 
         try
         {
-            TexFile? tex = null;
+            TexFile? tex;
 
-            // Use the actual Penumbra-resolved file where possible.
-            // Never silently substitute an unmodded texture.
             if (Path.IsPathRooted(actual))
             {
                 if (!File.Exists(actual))
                 {
-                    result.Detail = "Resolved file is missing.";
+                    result.Detail = "Resolved texture file missing.";
                     return result;
                 }
 
@@ -313,8 +334,7 @@ public sealed class Plugin : IDalamudPlugin
                 if (!actual.EndsWith(
                     ".tex", StringComparison.OrdinalIgnoreCase))
                 {
-                    result.Detail =
-                        "Resolved file is not a supported .tex.";
+                    result.Detail = "Resolved resource is not a .tex.";
                     return result;
                 }
 
@@ -329,7 +349,7 @@ public sealed class Plugin : IDalamudPlugin
                 if (!lookup.EndsWith(
                     ".tex", StringComparison.OrdinalIgnoreCase))
                 {
-                    result.Detail = "Game resource is not a .tex file.";
+                    result.Detail = "Unsupported game texture path.";
                     return result;
                 }
 
@@ -344,80 +364,107 @@ public sealed class Plugin : IDalamudPlugin
 
             int width = tex.Header.Width;
             int height = tex.Header.Height;
-            long pixels = (long)width * height;
 
-            if (pixels <= 0 || pixels > 8_388_608)
+            long pixelCount = (long)width * height;
+
+            if (pixelCount <= 0 || pixelCount > 8_388_608)
             {
-                result.Detail = "Invalid or oversized texture dimensions.";
+                result.Detail = "Unsupported texture dimensions.";
                 return result;
             }
 
-            // Lumina TexFile.ImageData is the first mip
-            // converted to BGRA8.
+            // Lumina returns BGRA8 data from the first mip.
             byte[] image = tex.ImageData;
 
-            if (image.Length < pixels * 4)
+            if (image.Length < pixelCount * 4)
             {
                 result.Detail = "Unexpected decoded image length.";
                 return result;
             }
 
-            var a = new bool[16];
-            var b = new bool[16];
-            int approximate = 0;
+            var stats = new RowStat[32];
 
-            for (int i = 0; i < (int)pixels; i++)
+            for (int i = 0; i < 32; i++)
+            {
+                stats[i] = new RowStat
+                {
+                    Row = $"{i / 2 + 1}{(i % 2 == 0 ? "A" : "B")}"
+                };
+            }
+
+            int exactPixels = 0;
+            int nearPixels = 0;
+            int offGridPixels = 0;
+
+            for (int i = 0; i < (int)pixelCount; i++)
             {
                 int offset = i * 4;
 
-                byte green = image[offset + 1];
                 byte red = image[offset + 2];
+                byte green = image[offset + 1];
 
-                // Dawntrail red channel:
-                // 00, 11, 22 ... FF for the 16 row pairs.
-                int pair = Math.Clamp(
-                    (red + 8) / 17,
-                    0, 15);
+                // Dawntrail ID row-pair red values:
+                // 0, 17, 34, ... 255.
+                int pair = Math.Clamp((red + 8) / 17, 0, 15);
 
-                int expectedRed = pair * 17;
+                int distance = Math.Abs(red - pair * 17);
 
-                if (Math.Abs(red - expectedRed) > 3)
-                    approximate++;
+                // Descriptive pixel classes.
+                // Not a claim of mesh visibility.
+                int quality;
 
-                // Green: 255 = A, 0 = B.
-                // Intermediate values blend A/B.
-                if (green > 0)
-                    a[pair] = true;
+                if (distance == 0)
+                {
+                    quality = 0;
+                    exactPixels++;
+                }
+                else if (distance <= 3)
+                {
+                    quality = 1;
+                    nearPixels++;
+                }
+                else
+                {
+                    quality = 2;
+                    offGridPixels++;
+                }
 
-                if (green < 255)
-                    b[pair] = true;
+                // 255 green = A; 0 green = B.
+                // Intermediate values blend both.
+                double a = green / 255.0;
+                double b = 1.0 - a;
+
+                AddSample(stats[pair * 2], a, quality);
+                AddSample(stats[pair * 2 + 1], b, quality);
             }
 
-            var rows = new List<string>();
-
-            for (int i = 0; i < 16; i++)
+            foreach (var stat in stats)
             {
-                if (a[i])
-                    rows.Add($"{i + 1}A");
+                stat.StrictPercent =
+                    100.0 * (stat.ExactWeight + stat.NearWeight)
+                    / pixelCount;
 
-                if (b[i])
-                    rows.Add($"{i + 1}B");
+                stat.OffGridPercent =
+                    100.0 * stat.OffGridWeight / pixelCount;
             }
 
             result.Success = true;
-            result.Rows = rows.ToArray();
+            result.Stats = stats;
+
+            result.Rows = stats
+                .Where(x => x.TotalPercent > 0)
+                .Select(x => x.Row)
+                .ToArray();
+
             result.Width = width;
             result.Height = height;
-            result.ApproximatePixels = approximate;
+            result.ExactPixels = exactPixels;
+            result.NearPixels = nearPixels;
+            result.ApproximatePixels = offGridPixels;
 
             result.Detail =
-                "Texture-referenced only; visible mesh UV usage is unverified.";
-
-            if (approximate > 0)
-            {
-                result.Detail +=
-                    " Some red values required nearest-pair quantization.";
-            }
+                "Texture-wide red/green channel statistics. " +
+                "Mesh UV visibility remains unverified.";
         }
         catch (Exception ex)
         {
@@ -431,9 +478,71 @@ public sealed class Plugin : IDalamudPlugin
         return result;
     }
 
-    // ---------------------------------------------------------
-    // PENUMBRA RESOURCE TREE
-    // ---------------------------------------------------------
+    private static void AddSample(
+        RowStat stat, double influence, int quality)
+    {
+        if (influence <= 0)
+            return;
+
+        switch (quality)
+        {
+            case 0:
+                stat.ExactHits++;
+                stat.ExactWeight += influence;
+                break;
+
+            case 1:
+                stat.NearHits++;
+                stat.NearWeight += influence;
+                break;
+
+            default:
+                stat.OffGridHits++;
+                stat.OffGridWeight += influence;
+                break;
+        }
+    }
+
+    private RowStat[] SelectedRows(DecodeResult? result)
+    {
+        if (result == null || !result.Success)
+            return Array.Empty<RowStat>();
+
+        var ranked = result.Stats
+            .Where(x => showAllRows
+                ? x.TotalPercent > 0
+                : x.StrictPercent >= minimumCoverage)
+            .OrderByDescending(x => x.StrictPercent)
+            .ThenByDescending(x => x.OffGridPercent);
+
+        return showAllRows
+            ? ranked.ToArray()
+            : ranked.Take(10).ToArray();
+    }
+
+    private static bool IsOutfitMaterial(MaterialEntry material)
+    {
+        return IsOutfit(material.GamePath);
+    }
+
+    private int SharedTextureLinks(DecodeResult result)
+    {
+        return models
+            .SelectMany(x => x.Materials)
+            .Concat(orphans)
+            .Count(m => m.Textures.Any(t =>
+                t.IsId &&
+                ReferenceEquals(t.Decoded, result)));
+    }
+
+    private static int RowOrder(string row)
+    {
+        if (row.Length < 2 ||
+            !int.TryParse(row[..^1], out int number))
+            return int.MaxValue;
+
+        return number * 2 + (row.EndsWith("B") ? 1 : 0);
+    }
 
     private void Visit(
         JObject node,
@@ -713,28 +822,24 @@ public sealed class Plugin : IDalamudPlugin
     private IEnumerable<string> LinkedRows()
     {
         return models
+            .Where(x => !outfitOnly || x.IsOutfit)
             .SelectMany(x => x.Materials)
+            .Where(m => !outfitOnly ||
+                showDependencies || IsOutfitMaterial(m))
             .SelectMany(x => x.Textures)
             .Where(x => x.IsId && x.Decoded?.Success == true)
-            .SelectMany(x => x.Decoded!.Rows)
+            .SelectMany(x => SelectedRows(x.Decoded))
+            .Select(x => x.Row)
             .Distinct()
-            .OrderBy(x =>
-            {
-                if (x.Length < 2)
-                    return int.MaxValue;
-
-                return int.TryParse(x[..^1], out int n)
-                    ? n * 2 + (x.EndsWith("B") ? 1 : 0)
-                    : int.MaxValue;
-            });
+            .OrderBy(RowOrder);
     }
 
     private string MakeDiagnostics()
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector — DEV2");
-        sb.AppendLine("Version: 0.0.2.0");
+        sb.AppendLine("Advanced Dye Row Inspector — DEV2 FIX1");
+        sb.AppendLine("Version: 0.0.2.1");
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
         sb.AppendLine("Object index: " + actorIndex);
@@ -770,8 +875,26 @@ public sealed class Plugin : IDalamudPlugin
                         if (texture.Decoded.Success)
                         {
                             sb.AppendLine(
-                                "    Texture-referenced rows: " +
+                                "    Texture-wide raw rows: " +
                                 string.Join(", ", texture.Decoded.Rows));
+
+                            sb.AppendLine(
+                                $"    Exact pixels: {texture.Decoded.ExactPixels}; " +
+                                $"near: {texture.Decoded.NearPixels}; " +
+                                $"off-grid: {texture.Decoded.ApproximatePixels}");
+
+                            foreach (var row in texture.Decoded.Stats
+                                .Where(x => x.TotalPercent > 0)
+                                .OrderByDescending(x => x.StrictPercent))
+                            {
+                                sb.AppendLine(
+                                    $"      {row.Row}: " +
+                                    $"clean {row.StrictPercent:F4}% " +
+                                    $"off-grid {row.OffGridPercent:F4}% | " +
+                                    $"exact hits {row.ExactHits}, " +
+                                    $"near hits {row.NearHits}, " +
+                                    $"off-grid hits {row.OffGridHits}");
+                            }
                         }
                     }
                 }
@@ -830,22 +953,59 @@ public sealed class Plugin : IDalamudPlugin
 
             if (result?.Success == true)
             {
-                ImGui.TextWrapped(
-                    "Texture-referenced rows: " +
-                    (result.Rows.Length > 0
-                        ? string.Join(", ", result.Rows)
-                        : "(none detected)"));
-
                 ImGui.TextDisabled(
                     $"{result.Width}x{result.Height} | " +
-                    "Texture-wide, NOT UV-confirmed.");
+                    "Texture-wide, NOT mesh-UV confirmed.");
 
-                if (result.ApproximatePixels > 0)
+                int links = SharedTextureLinks(result);
+
+                if (links > 1)
                 {
                     ImGui.TextDisabled(
-                        $"Quantized red-channel pixels: " +
-                        result.ApproximatePixels);
+                        $"Shared decoded ID source: " +
+                        $"{links} linked material nodes.");
                 }
+
+                int pixelCount = result.Width * result.Height;
+
+                ImGui.TextDisabled(
+                    $"Red-channel quality: " +
+                    $"{result.ExactPixels:N0} exact, " +
+                    $"{result.NearPixels:N0} near-palette, " +
+                    $"{result.ApproximatePixels:N0} off-grid " +
+                    $"of {pixelCount:N0} pixels.");
+
+                var selected = SelectedRows(result);
+
+                if (selected.Length == 0)
+                {
+                    ImGui.TextDisabled(
+                        "No clean-channel rows above threshold.");
+                }
+                else
+                {
+                    ImGui.TextUnformatted(
+                        $"Highest texture coverage ({selected.Length} shown):");
+
+                    foreach (var row in selected)
+                    {
+                        ImGui.TextWrapped(
+                            $"{row.Row}: " +
+                            $"{row.StrictPercent:F2}% clean + " +
+                            $"{row.OffGridPercent:F2}% off-grid estimate");
+                    }
+                }
+
+                if (!showAllRows &&
+                    result.Rows.Length > selected.Length)
+                {
+                    ImGui.TextDisabled(
+                        $"{result.Rows.Length - selected.Length} " +
+                        "additional rows available through Show all rows.");
+                }
+
+                ImGui.TextDisabled(
+                    "Coverage is texture-wide, not visible-mesh coverage.");
             }
             else
             {
@@ -876,25 +1036,28 @@ public sealed class Plugin : IDalamudPlugin
         if (ids.Count == 0)
         {
             ImGui.TextDisabled(
-                "No ID texture associated by this resource tree.");
+                "No ID texture linked by Penumbra resource tree.");
         }
         else
         {
             var rows = ids
                 .Where(x => x.Decoded?.Success == true)
-                .SelectMany(x => x.Decoded!.Rows)
+                .SelectMany(x => SelectedRows(x.Decoded))
+                .Select(x => x.Row)
                 .Distinct()
+                .OrderBy(RowOrder)
                 .ToArray();
 
             if (rows.Length > 0)
             {
                 ImGui.TextWrapped(
-                    "Referenced rows: " + string.Join(", ", rows));
+                    "Highlighted rows: " + string.Join(", ", rows));
+
                 ImGui.TextDisabled(
-                    "Texture-wide references; not confirmed visible.");
+                    "Ranked by texture coverage; not UV-confirmed.");
 
                 if (ImGui.SmallButton(
-                    $"Copy Rows##copy_{index}_{material.GetHashCode()}"))
+                    $"Copy Highlighted Rows##copy_{index}_{material.GetHashCode()}"))
                 {
                     ImGui.SetClipboardText(string.Join(", ", rows));
                 }
@@ -902,7 +1065,7 @@ public sealed class Plugin : IDalamudPlugin
             else
             {
                 ImGui.TextDisabled(
-                    "Row data unavailable or no rows detected.");
+                    "No rows above threshold, or decoder unavailable.");
             }
         }
 
@@ -919,8 +1082,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         string name = DisplayName(model.GamePath);
 
-        if (!ImGui.TreeNode(
-            $"{name}##model_{index}"))
+        if (!ImGui.TreeNode($"{name}##model_{index}"))
             return;
 
         DrawPath("Model", model.GamePath);
@@ -928,18 +1090,50 @@ public sealed class Plugin : IDalamudPlugin
         if (showPaths)
             DrawPath("Resolved", model.ActualPath);
 
-        if (model.Materials.Count == 0)
+        var outfitMaterials = model.Materials
+            .Where(IsOutfitMaterial)
+            .ToList();
+
+        var dependencies = model.Materials
+            .Where(m => !IsOutfitMaterial(m))
+            .ToList();
+
+        if (outfitMaterials.Count == 0)
         {
             ImGui.TextDisabled(
-                "No materials linked beneath this model in the resource tree.");
+                "No equipment/accessory materials directly classified.");
         }
         else
         {
-            ImGui.TextDisabled(
-                $"{model.Materials.Count} linked material(s)");
+            ImGui.TextUnformatted(
+                $"Outfit materials ({outfitMaterials.Count})");
 
-            for (int i = 0; i < model.Materials.Count; i++)
-                DrawMaterial(model.Materials[i], i);
+            for (int i = 0; i < outfitMaterials.Count; i++)
+                DrawMaterial(outfitMaterials[i], i);
+        }
+
+        if (dependencies.Count > 0)
+        {
+            if (!outfitOnly || showDependencies)
+            {
+                if (ImGui.TreeNode(
+                    $"Body / other dependencies ({dependencies.Count})##deps_{index}"))
+                {
+                    ImGui.TextDisabled(
+                        "Other linked materials; may include " +
+                        "body meshes, connectors or garment dependencies.");
+
+                    for (int i = 0; i < dependencies.Count; i++)
+                        DrawMaterial(dependencies[i], i + 1000);
+
+                    ImGui.TreePop();
+                }
+            }
+            else
+            {
+                ImGui.TextDisabled(
+                    $"{dependencies.Count} body/other materials hidden.");
+            }
         }
 
         ImGui.TreePop();
@@ -1007,7 +1201,7 @@ public sealed class Plugin : IDalamudPlugin
 
         ImGui.TextUnformatted("Advanced Dye Row Inspector");
         ImGui.SameLine();
-        ImGui.TextDisabled("DEV2 — 0.0.2");
+        ImGui.TextDisabled("DEV2 FIX1 — 0.0.2.1");
 
         ImGui.Separator();
 
@@ -1034,7 +1228,7 @@ public sealed class Plugin : IDalamudPlugin
 
         if (linkedRows.Length > 0)
         {
-            if (ImGui.Button("Copy All Rows"))
+            if (ImGui.Button("Copy Highlighted Rows"))
             {
                 ImGui.SetClipboardText(
                     string.Join(", ", linkedRows));
@@ -1049,6 +1243,27 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.SameLine();
         ImGui.Checkbox("Raw diagnostics", ref showRaw);
 
+        ImGui.Checkbox(
+            "Show body / other dependencies", ref showDependencies);
+
+        ImGui.SameLine();
+
+        ImGui.Checkbox(
+            "Show all detected rows", ref showAllRows);
+
+        if (!showAllRows)
+        {
+            ImGui.SliderFloat(
+                "Minimum clean coverage (%)",
+                ref minimumCoverage,
+                0.0f,
+                2.0f,
+                "%.2f%%");
+
+            ImGui.TextDisabled(
+                "Showing up to 10 highest-coverage rows per texture.");
+        }
+
         ImGui.Separator();
 
         ImGui.TextWrapped("Resource tree: " + treeStatus);
@@ -1059,9 +1274,9 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.Spacing();
 
         ImGui.TextDisabled(
-            "Row values come from actual decoded ID textures.");
+            "Clean = exact/near-palette ID values; off-grid = estimated.");
         ImGui.TextDisabled(
-            "Rows may include unused texture regions. UV visibility is not verified.");
+            "Texture coverage does not prove visible-garment row usage.");
 
         ImGui.Separator();
 
