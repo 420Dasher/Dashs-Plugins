@@ -180,11 +180,11 @@
     "Name":  "AdvancedDyeRowInspector",
     "InternalName":  "AdvancedDyeRowInspector",
     "AssemblyVersion":  "0.0.0.0",
-    "TestingAssemblyVersion":  "0.0.3.8",
+    "TestingAssemblyVersion":  "0.0.3.9",
     "Description":  "Read-only inspector for loaded character models, materials and candidate ID textures. Exact colorset row identification is planned for later development.",
     "Punchline":  "Inspect the materials behind your outfit.",
     "Changelog":  "Initial testing-only build.",
-    "TestingChangelog":  "DEV5: Read-only material shader and index-sampler audit. Compare MTRL-declared ID texture paths with Penumbra resource-tree links. Expose evidence under Advanced without modifying dye rows, UV rankings or materials.",
+    "TestingChangelog":  "DEV5 FIX1: Inspect all material sampler bindings and normal-map-derived ID candidates without claiming confirmed shader usage. Remove the unsuccessful area-weighting experiment and simplify Advanced UI. Original UV row analysis preserved.",
     "ApplicableVersion":  "any",
     "Tags":  [
                  "glamour",
@@ -204,6 +204,6 @@
     "DownloadLinkInstall":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkUpdate":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkTesting":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
-    "LastUpdate":  1794690502
+    "LastUpdate":  1794691683
 }
 ]
