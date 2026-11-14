@@ -7,7 +7,6 @@ using System.Text;
 
 using Dalamud.Bindings.ImGui;
 using Lumina.Data.Files;
-using System.Text;
 
 namespace AdvancedDyeRowInspector;
 
@@ -198,6 +197,109 @@ public sealed partial class Plugin
     private int uvTotalModels;
     private int uvProcessedModels;
 
+    private sealed class MeshIssue
+    {
+        public ModelEntry Model = null!;
+        public int MeshIndex;
+        public string Category = "";
+        public string Material = "";
+        public string Detail = "";
+    }
+
+    private readonly List<MeshIssue> meshIssues = new();
+
+    private void RecordMeshIssue(
+        ModelEntry model,
+        int meshIndex,
+        string category,
+        string material,
+        string detail)
+    {
+        meshIssues.Add(new MeshIssue
+        {
+            Model = model,
+            MeshIndex = meshIndex,
+            Category = category,
+            Material = material,
+            Detail = detail
+        });
+    }
+
+    private void DrawMeshIssueDiagnostics()
+    {
+        if (pendingUvModels.Count > 0)
+        {
+            ImGui.TextDisabled(
+                "Classification available when scan completes.");
+            return;
+        }
+
+        if (meshIssues.Count == 0)
+        {
+            ImGui.TextDisabled("No exclusions recorded.");
+            return;
+        }
+
+        if (!ImGui.TreeNode(
+            $"Excluded mesh details ({meshIssues.Count})##ADRIExclusions"))
+            return;
+
+        ImGui.TextDisabled(
+            "Reasons use actual parser and resource-link results.");
+        ImGui.TextDisabled(
+            "Non-outfit does not necessarily mean invisible.");
+
+        foreach (var group in meshIssues
+            .GroupBy(x => x.Category)
+            .OrderByDescending(x => x.Count()))
+        {
+            ImGui.TextUnformatted(
+                $"{group.Key} ({group.Count()})");
+
+            ImGui.Indent();
+
+            foreach (var issue in group)
+            {
+                string label = issue.MeshIndex < 0
+                    ? "Model"
+                    : $"Mesh {issue.MeshIndex}";
+
+                ImGui.BulletText(
+                    $"{issue.Model.Slot} / {label} / " +
+                    issue.Material);
+
+                ImGui.TextWrapped(issue.Detail);
+            }
+
+            ImGui.Unindent();
+            ImGui.Spacing();
+        }
+
+        ImGui.TreePop();
+    }
+
+    private void AppendMeshIssueDiagnostics(StringBuilder sb)
+    {
+        sb.AppendLine("[MESH CLASSIFICATION]");
+
+        sb.AppendLine(
+            $"Recorded issues: {meshIssues.Count}; " +
+            $"unmatched mesh counter: {uvUnmatchedMeshes}");
+
+        foreach (var issue in meshIssues)
+        {
+            sb.AppendLine(
+                $"[{issue.Category}] " +
+                $"slot={issue.Model.Slot} " +
+                $"mesh={issue.MeshIndex} " +
+                $"material={issue.Material}");
+
+            sb.AppendLine("  " + issue.Detail);
+            sb.AppendLine("  Model: " + issue.Model.GamePath);
+        }
+
+        sb.AppendLine();
+    }
     private void AnalyzeGeometry()
     {
         // This is called after the Penumbra resource scan.
@@ -206,6 +308,7 @@ public sealed partial class Plugin
 
         uvReports.Clear();
         uvModelStatus.Clear();
+        meshIssues.Clear();
         pendingUvModels.Clear();
         uvPixelCache.Clear();
 
@@ -295,6 +398,13 @@ public sealed partial class Plugin
                 }
                 catch (Exception ex)
                 {
+                    RecordMeshIssue(
+                        model,
+                        meshIndex,
+                        "Geometry read failure",
+                        "(unavailable)",
+                        ex.GetType().Name + ": " + ex.Message);
+
                     skipped++;
                     uvUnmatchedMeshes++;
 
@@ -317,6 +427,51 @@ public sealed partial class Plugin
 
                 if (matches.Count != 1)
                 {
+                    var linkedByName = model.Materials
+                        .Where(m => string.Equals(
+                            BaseName(m.GamePath),
+                            raw.MaterialName,
+                            StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                    string category;
+                    string detail;
+
+                    if (matches.Count > 1)
+                    {
+                        category = "Ambiguous outfit material";
+                        detail =
+                            $"{matches.Count} outfit material links " +
+                            "have the same mesh material name.";
+                    }
+                    else if (linkedByName.Count == 1 &&
+                             !IsOutfitMaterial(linkedByName[0]))
+                    {
+                        category = "Linked non-outfit resource";
+                        detail = linkedByName[0].GamePath;
+                    }
+                    else if (linkedByName.Count > 1)
+                    {
+                        category = "Ambiguous resource binding";
+                        detail =
+                            $"{linkedByName.Count} Penumbra-linked " +
+                            "materials have this name.";
+                    }
+                    else
+                    {
+                        category = "Unresolved material binding";
+                        detail =
+                            "No unique linked material with " +
+                            "the mesh's material name.";
+                    }
+
+                    RecordMeshIssue(
+                        model,
+                        meshIndex,
+                        category,
+                        raw.MaterialName,
+                        detail);
+
                     skipped++;
                     uvUnmatchedMeshes++;
 
@@ -347,6 +502,19 @@ public sealed partial class Plugin
 
                 if (ids.Count != 1)
                 {
+                    RecordMeshIssue(
+                        model,
+                        meshIndex,
+                        ids.Count == 0
+                            ? "ID texture unavailable"
+                            : "Ambiguous ID textures",
+                        raw.MaterialName,
+                        ids.Count == 0
+                            ? "No decoded ID texture uniquely " +
+                              "linked to this outfit material."
+                            : $"{ids.Count} resolved ID texture " +
+                              "sources linked to this material.");
+
                     skipped++;
                     uvUnmatchedMeshes++;
 
@@ -387,6 +555,14 @@ public sealed partial class Plugin
                 catch (Exception ex)
                 {
                     report.Status = ex.Message;
+
+                    RecordMeshIssue(
+                        model,
+                        meshIndex,
+                        "Texture or UV sampling failure",
+                        raw.MaterialName,
+                        ex.GetType().Name + ": " + ex.Message);
+
                     skipped++;
                     uvUnmatchedMeshes++;
 
@@ -408,6 +584,13 @@ public sealed partial class Plugin
         }
         catch (Exception ex)
         {
+            RecordMeshIssue(
+                model,
+                -1,
+                "Model processing failure",
+                "(model)",
+                ex.GetType().Name + ": " + ex.Message);
+
             uvModelStatus[model] =
                 "Model processing failed: " +
                 ex.GetType().Name + ": " + ex.Message;
@@ -895,6 +1078,7 @@ public sealed partial class Plugin
             "NOT visible-geometry proof");
 
         sb.AppendLine("Flip V: " + flipUvV);
+        AppendMeshIssueDiagnostics(sb);
 
         sb.AppendLine(
             $"Models: {uvMatchedModels}, " +

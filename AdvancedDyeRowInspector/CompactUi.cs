@@ -175,6 +175,17 @@ public sealed partial class Plugin
                 "Partial UV results - review diagnostics.");
         }
 
+        double cleanPercent = report.Samples > 0
+            ? 100.0 * report.CleanSamples / report.Samples
+            : 0.0;
+
+        if (cleanPercent < 95.0)
+        {
+            ImGui.TextDisabled(
+                $"ID sample quality: {cleanPercent:F1}% " +
+                "matched the expected red-channel palette.");
+        }
+
         var ranked = RankedUvRows(report).ToArray();
 
         if (ranked.Length == 0)
@@ -288,6 +299,8 @@ public sealed partial class Plugin
         ImGui.TextDisabled(
             $"Triangles sampled: {uvTriangles:N0}");
 
+        DrawMeshIssueDiagnostics();
+
         ImGui.TextWrapped(
             $"Penumbra: {treeStatus}");
 
@@ -354,7 +367,7 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "v0.0.3.4  |  Experimental UV analysis");
+            "v0.0.3.5  |  Experimental UV analysis");
 
         ImGui.Spacing();
 
@@ -425,8 +438,8 @@ public sealed partial class Plugin
         if (uvUnmatchedMeshes > 0)
         {
             ImGui.TextDisabled(
-                $"{uvUnmatchedMeshes} unmatched meshes; " +
-                "results may be partial.");
+                $"{uvUnmatchedMeshes} excluded meshes; " +
+                "see Advanced for the breakdown.");
         }
 
         ImGui.Separator();
