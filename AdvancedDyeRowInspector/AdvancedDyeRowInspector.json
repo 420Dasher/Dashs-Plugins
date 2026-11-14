@@ -2,7 +2,7 @@
     "Author":  "Dash + AI",
     "Name":  "AdvancedDyeRowInspector",
     "InternalName":  "AdvancedDyeRowInspector",
-    "AssemblyVersion":  "0.0.2.1",
+    "AssemblyVersion":  "0.0.3.0",
     "DalamudApiLevel":  15,
     "ApplicableVersion":  "any",
     "LoadRequiredState":  0,
@@ -10,7 +10,7 @@
     "CanUnloadAsync":  false,
     "LoadPriority":  0,
     "Punchline":  "Inspect the materials behind your outfit.",
-    "Description":  "Read-only material and ID texture inspector with per-row coverage statistics, pixel-quality diagnostics and outfit dependency filtering.",
+    "Description":  "Read-only material/ID texture inspector with experimental mesh UV0 triangle sampling and explicit confidence limits.",
     "Tags":  [
                  "glamour",
                  "dye",

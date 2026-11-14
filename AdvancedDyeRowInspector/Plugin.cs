@@ -18,7 +18,7 @@ using Newtonsoft.Json.Linq;
 
 namespace AdvancedDyeRowInspector;
 
-public sealed class Plugin : IDalamudPlugin
+public sealed partial class Plugin : IDalamudPlugin
 {
     [PluginService]
     private static IDalamudPluginInterface Pi { get; set; } = null!;
@@ -791,6 +791,7 @@ public sealed class Plugin : IDalamudPlugin
 
         ReadFlatPaths(index);
         ReadTree(index);
+        AnalyzeGeometry();
 
         int materials = models.Sum(x => x.Materials.Count);
         int linkedIds = models.Sum(x =>
@@ -838,8 +839,8 @@ public sealed class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector — DEV2 FIX1");
-        sb.AppendLine("Version: 0.0.2.1");
+        sb.AppendLine("Advanced Dye Row Inspector — DEV3 Experimental");
+        sb.AppendLine("Version: 0.0.3.0");
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
         sb.AppendLine("Object index: " + actorIndex);
@@ -911,6 +912,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         sb.AppendLine();
+        AppendUvDiagnostics(sb);
         sb.AppendLine("[FLAT PENUMBRA RESOURCE SNAPSHOT]");
 
         foreach (var item in flat)
@@ -1027,6 +1029,7 @@ public sealed class Plugin : IDalamudPlugin
             return;
 
         DrawPath("Material", material.GamePath);
+        DrawUvReport(material);
 
         if (showPaths)
             DrawPath("Resolved", material.ActualPath);
@@ -1086,6 +1089,7 @@ public sealed class Plugin : IDalamudPlugin
             return;
 
         DrawPath("Model", model.GamePath);
+        DrawUvModelStatus(model);
 
         if (showPaths)
             DrawPath("Resolved", model.ActualPath);
@@ -1201,7 +1205,7 @@ public sealed class Plugin : IDalamudPlugin
 
         ImGui.TextUnformatted("Advanced Dye Row Inspector");
         ImGui.SameLine();
-        ImGui.TextDisabled("DEV2 FIX1 — 0.0.2.1");
+        ImGui.TextDisabled("DEV3 EXPERIMENTAL — 0.0.3");
 
         ImGui.Separator();
 
@@ -1242,6 +1246,7 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.Checkbox("Show paths", ref showPaths);
         ImGui.SameLine();
         ImGui.Checkbox("Raw diagnostics", ref showRaw);
+        DrawUvControls();
 
         ImGui.Checkbox(
             "Show body / other dependencies", ref showDependencies);
