@@ -450,7 +450,12 @@ public sealed partial class Plugin
         ImGui.TextDisabled(
             "Selected: " + PreviewRowName(selectedPreviewRow));
 
-        if (activeLivePreview.HasValue ||
+        if (screenNoiseRunning)
+        {
+            ImGui.TextDisabled(
+                "Finish screen capture before highlighting.");
+        }
+        else if (activeLivePreview.HasValue ||
             pendingLivePreview.HasValue)
         {
             if (ImGui.SmallButton(

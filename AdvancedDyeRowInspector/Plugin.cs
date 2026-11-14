@@ -36,6 +36,12 @@ public sealed partial class Plugin : IDalamudPlugin
     private static IPluginLog Log { get; set; } = null!;
 
     [PluginService]
+    private static ITextureProvider Textures { get; set; } = null!;
+
+    [PluginService]
+    private static ITextureReadbackProvider Readback { get; set; } = null!;
+
+    [PluginService]
     private static IFramework Framework { get; set; } = null!;
 
     // Confirmed Penumbra API V5 signatures.
@@ -200,6 +206,8 @@ public sealed partial class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        DisposeScreenNoiseMeasurement();
+
         Framework.Update -= OnLivePreviewFramework;
         EndLivePreview("Plugin unloaded.");
 
@@ -855,8 +863,8 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector - DEV6 STAGE 2");
-        sb.AppendLine("Version: 0.0.3.12");
+        sb.AppendLine("Advanced Dye Row Inspector - DEV7 STAGE 1");
+        sb.AppendLine("Version: 0.0.3.13");
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
         sb.AppendLine("Object index: " + actorIndex);
@@ -933,6 +941,7 @@ public sealed partial class Plugin : IDalamudPlugin
         AppendRuntimeMaterialDiagnostics(sb);
         AppendPreviewTargetDiagnostics(sb);
         AppendLivePreviewDiagnostics(sb);
+        AppendScreenNoiseDiagnostics(sb);
         sb.AppendLine("[FLAT PENUMBRA RESOURCE SNAPSHOT]");
 
         foreach (var item in flat)
