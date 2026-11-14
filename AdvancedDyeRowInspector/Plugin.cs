@@ -839,8 +839,8 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector — DEV3 FIX1");
-        sb.AppendLine("Version: 0.0.3.1");
+        sb.AppendLine("Advanced Dye Row Inspector — DEV3 FIX2");
+        sb.AppendLine("Version: 0.0.3.2");
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
         sb.AppendLine("Object index: " + actorIndex);
@@ -1207,7 +1207,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
         ImGui.TextUnformatted("Advanced Dye Row Inspector");
         ImGui.SameLine();
-        ImGui.TextDisabled("DEV3 FIX1 — 0.0.3.1");
+        ImGui.TextDisabled("DEV3 FIX2 — 0.0.3.2");
 
         ImGui.Separator();
 

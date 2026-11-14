@@ -84,11 +84,11 @@ public sealed partial class Plugin
                     "Resolved model absent or over 64 MiB.");
             }
 
-            return Data.GameData.GetFileFromDisk<MdlFile>(
+            return Data.GameData.GetFileFromDisk<AdriGeometryMdlFile>(
                 actual, game);
         }
 
-        return Data.GetFile<MdlFile>(
+        return Data.GetFile<AdriGeometryMdlFile>(
             string.IsNullOrWhiteSpace(actual)
                 ? game
                 : actual);
