@@ -74,14 +74,78 @@ public sealed partial class Plugin
         return char.ToUpperInvariant(file[0]) + file[1..];
     }
 
+    // A shared material requires the same game resource
+    // AND the same resolved resource, referenced by
+    // distinct outfit equipment slots.
+    //
+    // Matching filenames or shared ID textures alone
+    // are never sufficient evidence.
+
+    private static string NormalizeResourcePath(string path)
+    {
+        return path.Trim().Replace('\\', '/');
+    }
+
+    private string[] VerifiedSharedSlots(
+        MaterialEntry material,
+        string selectedSlot)
+    {
+        if (string.IsNullOrWhiteSpace(material.GamePath) ||
+            string.IsNullOrWhiteSpace(material.ActualPath))
+        {
+            return Array.Empty<string>();
+        }
+
+        string gamePath =
+            NormalizeResourcePath(material.GamePath);
+
+        string resolvedPath =
+            NormalizeResourcePath(material.ActualPath);
+
+        return models
+            .Where(model =>
+                model.IsOutfit &&
+                model.Slot != selectedSlot &&
+                model.Slot != "Other / Unassigned" &&
+                SlotOrder.Contains(model.Slot))
+            .Where(model => model.Materials.Any(candidate =>
+                IsOutfitMaterial(candidate) &&
+                !string.IsNullOrWhiteSpace(candidate.GamePath) &&
+                !string.IsNullOrWhiteSpace(candidate.ActualPath) &&
+                string.Equals(
+                    NormalizeResourcePath(candidate.GamePath),
+                    gamePath,
+                    StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(
+                    NormalizeResourcePath(candidate.ActualPath),
+                    resolvedPath,
+                    StringComparison.OrdinalIgnoreCase)))
+            .Select(model => model.Slot)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(slot => Array.IndexOf(SlotOrder, slot))
+            .ToArray();
+    }
     private void DrawCompactMaterial(
         MaterialEntry material,
         int index)
     {
         ImGui.Separator();
 
-        ImGui.TextUnformatted(
-            FriendlyMaterialName(material.GamePath));
+        ImGui.TextUnformatted(compactSlot);
+        ImGui.SameLine();
+        ImGui.TextDisabled("Experimental UV analysis");
+
+        ImGui.TextDisabled(
+            "Material: " + FriendlyMaterialName(material.GamePath));
+
+        var sharedSlots = VerifiedSharedSlots(
+            material, compactSlot);
+
+        if (sharedSlots.Length > 0)
+        {
+            ImGui.TextDisabled(
+                "Shared with: " + string.Join(", ", sharedSlots));
+        }
 
         if (compactAdvanced && showPaths)
             ImGui.TextDisabled(material.GamePath);
@@ -264,7 +328,7 @@ public sealed partial class Plugin
         ProcessGeometryStep();
 
         ImGui.SetNextWindowSize(
-            new Vector2(565f, 480f),
+            new Vector2(520f, 420f),
             ImGuiCond.FirstUseEver);
 
         bool open = windowOpen;
@@ -290,7 +354,7 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "v0.0.3.3  |  Experimental UV analysis");
+            "v0.0.3.4  |  Experimental UV analysis");
 
         ImGui.Spacing();
 
@@ -319,6 +383,15 @@ public sealed partial class Plugin
             compactAdvanced ? "Hide details" : "Advanced"))
         {
             compactAdvanced = !compactAdvanced;
+        }
+
+        ImGui.SameLine();
+
+        if (ImGui.SmallButton("Fit window"))
+        {
+            ImGui.SetWindowSize(
+                new Vector2(520f, 420f),
+                ImGuiCond.Always);
         }
 
         ImGui.Spacing();

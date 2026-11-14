@@ -2,7 +2,7 @@
     "Author":  "Dash + AI",
     "Name":  "AdvancedDyeRowInspector",
     "InternalName":  "AdvancedDyeRowInspector",
-    "AssemblyVersion":  "0.0.3.3",
+    "AssemblyVersion":  "0.0.3.4",
     "DalamudApiLevel":  15,
     "ApplicableVersion":  "any",
     "LoadRequiredState":  0,
@@ -10,7 +10,7 @@
     "CanUnloadAsync":  false,
     "LoadPriority":  0,
     "Punchline":  "Inspect the materials behind your outfit.",
-    "Description":  "Read-only mesh UV dye row inspector with compact outfit-first UI, automatic Dalamud theme colors and optional advanced diagnostics.",
+    "Description":  "Read-only mesh UV dye row inspector with compact theme-aware UI, verified cross-slot material sharing and optional diagnostics.",
     "Tags":  [
                  "glamour",
                  "dye",
