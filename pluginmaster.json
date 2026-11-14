@@ -180,11 +180,11 @@
     "Name":  "AdvancedDyeRowInspector",
     "InternalName":  "AdvancedDyeRowInspector",
     "AssemblyVersion":  "0.0.0.0",
-    "TestingAssemblyVersion":  "0.0.3.11",
+    "TestingAssemblyVersion":  "0.0.3.12",
     "Description":  "Read-only inspector for loaded character models, materials and candidate ID textures. Exact colorset row identification is planned for later development.",
     "Punchline":  "Inspect the materials behind your outfit.",
     "Changelog":  "Initial testing-only build.",
-    "TestingChangelog":  "DEV6 stage 1: Read-only resolution of live model/material slots and GPU colorset texture dimensions/format. Prepares exact target identification for temporary row highlighting. No game-memory writes; UV analysis and compact UI preserved.",
+    "TestingChangelog":  "DEV6 Stage 2: Experimental six-second single-row live colorset highlighting with Stop, timeout and unload restoration. Corrected native pointer comparison and framework callback compilation. Existing UV scanner and UI retained.",
     "ApplicableVersion":  "any",
     "Tags":  [
                  "glamour",
@@ -204,6 +204,6 @@
     "DownloadLinkInstall":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkUpdate":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkTesting":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
-    "LastUpdate":  1794693646
+    "LastUpdate":  1794695050
 }
 ]
