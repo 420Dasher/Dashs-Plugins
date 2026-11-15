@@ -295,6 +295,7 @@ public sealed unsafe partial class Plugin
         // European Light/Chaos pair. Derive DC row IDs
         // from Lumina rather than hardcoding numeric IDs.
         var lightAnchors = sheet.Where(x =>
+            x.IsPublic &&
             string.Equals(
                 x.Name.ToString(),
                 "Raiden",
@@ -303,6 +304,7 @@ public sealed unsafe partial class Plugin
             .ToArray();
 
         var chaosAnchors = sheet.Where(x =>
+            x.IsPublic &&
             string.Equals(
                 x.Name.ToString(),
                 "Cerberus",
@@ -336,6 +338,7 @@ public sealed unsafe partial class Plugin
         var expected = sheet
             .Where(x =>
                 x.RowId != 0 &&
+                x.IsPublic &&
                 x.DataCenter.RowId == selectedDc &&
                 !string.IsNullOrWhiteSpace(
                     x.Name.ToString()))

@@ -191,6 +191,7 @@ public sealed unsafe partial class Plugin
         var worlds = sheet
             .Where(x =>
                 x.RowId != 0 &&
+                x.IsPublic &&
                 x.DataCenter.RowId == dc &&
                 !string.IsNullOrWhiteSpace(
                     x.Name.ToString()))
