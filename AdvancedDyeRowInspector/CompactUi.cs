@@ -135,7 +135,8 @@ public sealed partial class Plugin
         ImGui.TextUnformatted(compactSlot);
 
         ImGui.TextDisabled(
-            "Material: " + FriendlyMaterialName(material.GamePath));
+            "Material: " +
+            FriendlyMaterialName(material.GamePath));
 
         var sharedSlots = VerifiedSharedSlots(
             material, compactSlot);
@@ -143,7 +144,8 @@ public sealed partial class Plugin
         if (sharedSlots.Length > 0)
         {
             ImGui.TextDisabled(
-                "Shared with: " + string.Join(", ", sharedSlots));
+                "Shared with: " +
+                string.Join(", ", sharedSlots));
         }
 
         if (compactAdvanced && showPaths)
@@ -157,32 +159,22 @@ public sealed partial class Plugin
             ImGui.TextDisabled(
                 "UV analysis unavailable for this material.");
 
-            ImGui.TextDisabled(
-                "Texture-wide candidates remain in Advanced.");
-
             return;
         }
-
-        ImGui.TextDisabled(
-            $"UV sampled  |  {report.Triangles:N0} triangles  |  " +
-            $"{report.Meshes} mesh(es)");
 
         if (report.Capped ||
             !string.IsNullOrWhiteSpace(report.Status))
         {
             ImGui.TextDisabled(
-                "Partial UV results - review diagnostics.");
+                "Partial UV analysis; see troubleshooting.");
         }
 
-        double cleanPercent = report.Samples > 0
-            ? 100.0 * report.CleanSamples / report.Samples
-            : 0.0;
-
-        if (cleanPercent < 95.0)
+        // The main scan controls appear once per slot,
+        // and only for an unambiguous single material.
+        if (index == 0)
         {
-            ImGui.TextDisabled(
-                $"ID sample quality: {cleanPercent:F1}% " +
-                "matched the expected red-channel palette.");
+            DrawCompactAutoScan(
+                CompactModels(compactSlot));
         }
 
         var ranked = RankedUvRows(report).ToArray();
@@ -190,66 +182,77 @@ public sealed partial class Plugin
         if (ranked.Length == 0)
         {
             ImGui.TextDisabled(
-                "No sampled rows above the current threshold.");
+                "No UV rows pass the sampling threshold.");
             return;
         }
 
-        int shown = compactShowMoreRows
-            ? ranked.Length
-            : Math.Min(5, ranked.Length);
+        bool hasVisual = HasCompactAutoResults();
+        bool showUv = true;
 
-        for (int i = 0; i < shown; i++)
+        if (hasVisual)
         {
-            var row = ranked[i];
-
-            ImGui.TextUnformatted(row.Row);
-            ImGui.SameLine();
-
-            ImGui.ProgressBar(
-                Math.Clamp(
-                    (float)(row.Percent / 100.0),
-                    0f, 1f),
-                new Vector2(
-                    Math.Min(
-                        270f,
-                        Math.Max(
-                            120f,
-                            ImGui.GetContentRegionAvail().X)),
-                    0f),
-                $"{row.Percent:F1}%");
+            showUv = ImGui.TreeNode(
+                "UV-only sampling details##ADRICompactUV");
+        }
+        else
+        {
+            ImGui.Spacing();
+            ImGui.TextDisabled(
+                "UV candidates (not visually verified)");
         }
 
-        if (ranked.Length > 5)
+        if (showUv)
         {
-            string label = compactShowMoreRows
-                ? "Show fewer rows"
-                : $"Show {ranked.Length - 5} more rows";
+            ImGui.TextDisabled(
+                $"UV sampling: {report.Triangles:N0} " +
+                $"triangles, {report.Meshes} mesh(es)");
 
-            if (ImGui.SmallButton(
-                $"{label}##more_{index}"))
+            int shown = compactShowMoreRows
+                ? ranked.Length
+                : Math.Min(5, ranked.Length);
+
+            for (int i = 0; i < shown; i++)
             {
-                compactShowMoreRows = !compactShowMoreRows;
+                var row = ranked[i];
+
+                ImGui.TextUnformatted(row.Row);
+                ImGui.SameLine();
+
+                ImGui.ProgressBar(
+                    Math.Clamp(
+                        (float)(row.Percent / 100.0),
+                        0f,
+                        1f),
+                    new System.Numerics.Vector2(
+                        Math.Min(
+                            250f,
+                            Math.Max(
+                                110f,
+                                ImGui.GetContentRegionAvail().X)),
+                        0f),
+                    $"{row.Percent:F1}%");
             }
+
+            if (ranked.Length > 5)
+            {
+                string label = compactShowMoreRows
+                    ? "Show fewer UV rows"
+                    : $"Show {ranked.Length - 5} more UV rows";
+
+                if (ImGui.SmallButton(
+                    $"{label}##uvmore_{index}"))
+                {
+                    compactShowMoreRows = !compactShowMoreRows;
+                }
+            }
+
+            ImGui.TextDisabled(
+                "UV influence is not confirmed " +
+                "on-screen visibility.");
+
+            if (hasVisual)
+                ImGui.TreePop();
         }
-
-        ImGui.SameLine();
-
-        if (ImGui.SmallButton(
-            $"Copy UV rows##copyuv_{index}"))
-        {
-            ImGui.SetClipboardText(
-                string.Join(
-                    ", ",
-                    ranked
-                        .Select(x => x.Row)
-                        .OrderBy(RowOrder)));
-        }
-
-        ImGui.Spacing();
-        ImGui.TextDisabled(
-            "UV sample influence, not confirmed on-screen visibility.");
-
-
     }
 
     private void DrawCompactAdvanced(
@@ -259,94 +262,115 @@ public sealed partial class Plugin
             return;
 
         ImGui.Separator();
-
-        ImGui.TextDisabled("Advanced inspection");
-
-        if (ImGui.TreeNode("Display / sampling options"))
-        {
-            ImGui.Checkbox("Show paths", ref showPaths);
-        ImGui.SameLine();
-        ImGui.Checkbox("Outfit only", ref outfitOnly);
-
-        ImGui.Checkbox(
-            "Body / other dependencies", ref showDependencies);
-
-        ImGui.SameLine();
-        ImGui.Checkbox("Raw resources", ref showRaw);
-
-        ImGui.Checkbox(
-            "All texture rows", ref showAllRows);
-
-        if (!showAllRows)
-        {
-            ImGui.SliderFloat(
-                "Min. clean texture coverage (%)",
-                ref minimumCoverage,
-                0f, 2f, "%.2f%%");
-        }
-
-        ImGui.SliderFloat(
-            "Min. UV influence (%)",
-            ref minimumUvPercent,
-            0f, 10f, "%.2f%%");
-
-        ImGui.Checkbox(
-            "Flip UV V (rescan required)",
-            ref flipUvV);
-
-            ImGui.TreePop();
-        }
-
-        ImGui.TextDisabled(
-            $"Geometry: {uvProcessedModels}/{uvTotalModels} models, " +
-            $"{uvMatchedMeshes} matched meshes, " +
-            $"{uvUnmatchedMeshes} unmatched");
-
-        ImGui.TextDisabled(
-            $"Triangles sampled: {uvTriangles:N0}");
-
-        DrawMeshIssueDiagnostics();
-
-        DrawScreenNoiseDiagnostics();
-
-        DrawControlledRowDiagnostics(selectedModels);
-
-        DrawAutoRowScanDiagnostics(selectedModels);
-
-        DrawMaterialAudit(selectedModels);
-
-
-
-        if (ImGui.TreeNode("Connection details"))
-        {
-            ImGui.TextWrapped($"Penumbra: {treeStatus}");
-            ImGui.TextWrapped($"Resource paths: {pathStatus}");
-            ImGui.TextWrapped($"Glamourer: {glamourerStatus}");
-            ImGui.TreePop();
-        }
-
-        if (ImGui.Button("Copy full diagnostics"))
-            ImGui.SetClipboardText(MakeDiagnostics());
-
-        ImGui.Spacing();
+        ImGui.TextDisabled("Advanced");
 
         if (ImGui.TreeNode(
-            "Detailed models, materials and textures"))
+            "Display / sampling options"))
         {
-            for (int i = 0; i < selectedModels.Count; i++)
-                DrawModel(selectedModels[i], i);
+            ImGui.Checkbox(
+                "Show paths", ref showPaths);
+
+            ImGui.SameLine();
+
+            ImGui.Checkbox(
+                "Outfit only", ref outfitOnly);
+
+            ImGui.Checkbox(
+                "Body / other dependencies",
+                ref showDependencies);
+
+            ImGui.SameLine();
+
+            ImGui.Checkbox(
+                "Raw resources", ref showRaw);
+
+            ImGui.Checkbox(
+                "All texture rows", ref showAllRows);
+
+            if (!showAllRows)
+            {
+                ImGui.SliderFloat(
+                    "Min. clean texture coverage (%)",
+                    ref minimumCoverage,
+                    0f, 2f, "%.2f%%");
+            }
+
+            ImGui.SliderFloat(
+                "Min. UV influence (%)",
+                ref minimumUvPercent,
+                0f, 10f, "%.2f%%");
+
+            ImGui.Checkbox(
+                "Flip UV V (rescan required)",
+                ref flipUvV);
 
             ImGui.TreePop();
         }
 
-        if (showRaw)
-            DrawRaw();
+        if (ImGui.TreeNode(
+            "Troubleshooting / developer tools"))
+        {
+            ImGui.TextDisabled(
+                $"Geometry: {uvProcessedModels}/" +
+                $"{uvTotalModels} models, " +
+                $"{uvMatchedMeshes} matched meshes, " +
+                $"{uvUnmatchedMeshes} unmatched");
 
+            ImGui.TextDisabled(
+                $"Triangles sampled: {uvTriangles:N0}");
 
+            DrawMeshIssueDiagnostics();
+
+            // Keep useful development tools available,
+            // but remove their clutter from the main UI.
+            DrawScreenNoiseDiagnostics();
+
+            DrawControlledRowDiagnostics(
+                selectedModels);
+
+            DrawMaterialAudit(selectedModels);
+
+            if (ImGui.TreeNode("Connection details"))
+            {
+                ImGui.TextWrapped(
+                    $"Penumbra: {treeStatus}");
+
+                ImGui.TextWrapped(
+                    $"Resource paths: {pathStatus}");
+
+                ImGui.TextWrapped(
+                    $"Glamourer: {glamourerStatus}");
+
+                ImGui.TreePop();
+            }
+
+            if (ImGui.SmallButton(
+                "Copy full diagnostics"))
+            {
+                ImGui.SetClipboardText(
+                    MakeDiagnostics());
+            }
+
+            if (ImGui.TreeNode(
+                "Detailed models and textures"))
+            {
+                for (int i = 0;
+                     i < selectedModels.Count;
+                     i++)
+                {
+                    DrawModel(selectedModels[i], i);
+                }
+
+                ImGui.TreePop();
+            }
+
+            if (showRaw)
+                DrawRaw();
+
+            ImGui.TreePop();
+        }
     }
 
-    // Fit the actual content to the available display.
-    // Preserve scrolling when content exceeds screen height.
     private static void FitCompactWindow(float requiredHeight)
     {
         var display = ImGui.GetIO().DisplaySize;
@@ -418,11 +442,15 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "v0.0.3.17  |  Experimental UV analysis");
+            "v0.0.3.18  |  Experimental UV analysis");
 
         ImGui.Spacing();
 
-        if (ImGui.Button("Scan outfit"))
+        if (autoRowScanRunning)
+        {
+            ImGui.TextDisabled("Checking dye rows...");
+        }
+        else if (ImGui.Button("Scan outfit"))
         {
             Scan();
             compactShowMoreRows = false;
@@ -434,7 +462,7 @@ public sealed partial class Plugin
 
         if (selectedRows.Length > 0)
         {
-            if (ImGui.Button("Copy slot rows"))
+            if (ImGui.Button("Copy UV rows"))
             {
                 ImGui.SetClipboardText(
                     string.Join(", ", selectedRows));

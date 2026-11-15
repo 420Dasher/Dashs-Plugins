@@ -45,6 +45,9 @@ public sealed partial class Plugin
     private string autoRowScanStatus = "Not scanned.";
     private string autoRowScanSlot = "";
 
+    // Results are valid only for the scan that made them.
+    private DateTime autoRowScanSourceTime;
+
     private static int ParseAutoRowIndex(string row)
     {
         if (row.Length < 2 ||
@@ -194,6 +197,7 @@ public sealed partial class Plugin
             autoRowScanCancellation = source;
             autoRowScanResults.Clear();
             autoRowScanSlot = slot;
+            autoRowScanSourceTime = scanTime;
             autoRowScanRunning = true;
 
             autoRowScanStatus =
@@ -477,135 +481,186 @@ public sealed partial class Plugin
         CancelAutoRowScan();
     }
 
-    private void DrawAutoRowScanDiagnostics(
-        List<ModelEntry> selectedModels)
+    private AutoRowResult[] CurrentCompactAutoResults()
     {
-        if (!ImGui.TreeNode(
-            "DEV7 / automatic candidate scan"))
+        lock (autoRowScanGate)
         {
-            return;
+            if (autoRowScanSourceTime != scanTime ||
+                autoRowScanSlot != compactSlot)
+            {
+                return Array.Empty<AutoRowResult>();
+            }
+
+            return autoRowScanResults
+                .OrderByDescending(r => r.NetSignal)
+                .ToArray();
+        }
+    }
+
+    private bool HasCompactAutoResults()
+    {
+        lock (autoRowScanGate)
+        {
+            return autoRowScanSourceTime == scanTime &&
+                   autoRowScanSlot == compactSlot &&
+                   autoRowScanResults.Count > 0;
+        }
+    }
+
+    private static string CompactSignalAssessment(
+        string assessment)
+    {
+        if (assessment.StartsWith(
+            "Strong", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Strong comparative signal";
         }
 
-        ImGui.TextDisabled(
-            "Tests up to five UV-ranked rows automatically.");
+        if (assessment.StartsWith(
+            "Possible", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Possible visible effect";
+        }
 
-        ImGui.TextDisabled(
-            "Three controlled comparisons per row; " +
-            "restores the colorset between trials.");
+        return "Inconclusive / low signal";
+    }
+
+    private void DrawCompactAutoScan(
+        List<ModelEntry> selectedModels)
+    {
+        ImGui.Separator();
+        ImGui.TextUnformatted("Visual row check");
 
         var candidates =
             GetAutoRowCandidates(selectedModels);
 
-        if (!autoRowScanRunning)
+        if (autoRowScanRunning)
         {
-            if (candidates.Length == 0)
+            if (ImGui.SmallButton(
+                "Cancel row scan##ADRICompactAutoCancel"))
             {
-                ImGui.TextDisabled(
-                    "No eligible single-material UV scan.");
+                CancelAutoRowScan();
             }
-            else
-            {
-                ImGui.TextDisabled(
-                    "Candidates: " +
-                    string.Join(", ",
-                        candidates.Select(x => x.Row)));
-            }
-
-            if (candidates.Length > 0 &&
-                ImGui.SmallButton(
-                    "Scan top UV rows##ADRIAutoStart"))
+        }
+        else if (candidates.Length > 0)
+        {
+            if (ImGui.SmallButton(
+                "Check top 5 rows##ADRICompactAutoStart"))
             {
                 BeginAutoRowScan(selectedModels);
             }
         }
         else
         {
-            if (ImGui.SmallButton(
-                "Cancel automatic scan##ADRIAutoCancel"))
-            {
-                CancelAutoRowScan();
-            }
+            ImGui.TextDisabled(
+                "No uniquely matched UV candidates available.");
         }
 
-        string status;
-        string slot;
-        AutoRowResult[] results;
+        string message;
+        bool belongsToCurrentScan;
 
         lock (autoRowScanGate)
         {
-            status = autoRowScanStatus;
-            slot = autoRowScanSlot;
-            results = autoRowScanResults.ToArray();
+            belongsToCurrentScan =
+                autoRowScanSourceTime == scanTime &&
+                autoRowScanSlot == compactSlot;
+
+            message = autoRowScanStatus;
         }
 
-        ImGui.TextWrapped(status);
-
-        if (results.Length > 0)
+        if (belongsToCurrentScan)
         {
-            ImGui.Spacing();
-            ImGui.Separator();
+            ImGui.TextDisabled(message);
+        }
+        else
+        {
+            ImGui.TextDisabled(
+                "Not checked for this outfit scan.");
+        }
 
-            ImGui.TextUnformatted(
-                $"Measured {results.Length} candidate(s) " +
-                $"for {slot}");
+        var results = CurrentCompactAutoResults();
 
-            if (slot != compactSlot)
-            {
-                ImGui.TextDisabled(
-                    "Results belong to another equipment slot.");
-            }
+        if (results.Length == 0)
+        {
+            ImGui.TextDisabled(
+                "Checks current-camera screen changes " +
+                "against a no-change control.");
+
+            return;
+        }
+
+        ImGui.Spacing();
+        ImGui.TextDisabled(
+            $"Visual signal above control | " +
+            $"{results.Length} row(s) measured");
+
+        double largest = Math.Max(
+            0.001,
+            results.Max(r => r.NetSignal));
+
+        foreach (var result in results)
+        {
+            ImGui.TextUnformatted(result.Row);
+            ImGui.SameLine();
+
+            float width = Math.Clamp(
+                ImGui.GetContentRegionAvail().X - 105f,
+                110f,
+                215f);
+
+            ImGui.ProgressBar(
+                (float)Math.Clamp(
+                    result.NetSignal / largest,
+                    0.0,
+                    1.0),
+                new System.Numerics.Vector2(width, 0f),
+                $"{result.NetSignal:F2}%");
+
+            ImGui.SameLine();
+            ImGui.TextDisabled(
+                $"UV {result.UvPercent:F1}%");
 
             ImGui.TextDisabled(
-                "Ranked by core signal above no-change control.");
+                CompactSignalAssessment(result.Assessment));
 
-            int rank = 0;
-
-            foreach (var result in results
-                .OrderByDescending(r => r.NetSignal))
+            if (result.Retries > 0)
             {
-                rank++;
-
-                ImGui.TextUnformatted(
-                    $"#{rank}  {result.Row}  |  " +
-                    $"Above control: {result.NetSignal:F2}%");
-
                 ImGui.TextDisabled(
-                    $"Core: {result.CoreMedian:F2}%  |  " +
-                    $"Control: {result.ControlMedian:F2}%");
+                    $"Retried {result.Retries} noisy trial(s).");
+            }
+        }
 
-                ImGui.TextDisabled(
-                    $"UV: {result.UvPercent:F1}%  |  " +
-                    $"Core range: {result.CoreMin:F2}-" +
-                    $"{result.CoreMax:F2}%");
+        // Copy only candidates with positive evidence.
+        // This is distinct from the toolbar's UV-only copy.
+        var likely = results
+            .Where(r =>
+                r.Assessment.StartsWith(
+                    "Strong",
+                    StringComparison.OrdinalIgnoreCase) ||
+                r.Assessment.StartsWith(
+                    "Possible",
+                    StringComparison.OrdinalIgnoreCase))
+            .Select(r => r.Row)
+            .ToArray();
 
-                ImGui.TextDisabled(
-                    $"Outer median: {result.OuterMedian:F2}%  |  " +
-                    $"range: {result.OuterMin:F2}-" +
-                    $"{result.OuterMax:F2}%");
-
-                ImGui.TextWrapped(result.Assessment);
-
-                if (result.Retries > 0)
-                {
-                    ImGui.TextDisabled(
-                        $"Retried {result.Retries} noisy trial(s).");
-                }
-
-                ImGui.Spacing();
+        if (likely.Length > 0)
+        {
+            if (ImGui.SmallButton(
+                "Copy likely rows##ADRICompactCopyLikely"))
+            {
+                ImGui.SetClipboardText(
+                    string.Join(", ", likely));
             }
         }
 
         ImGui.TextDisabled(
-            "Experimental screen-change rankings only.");
+            "Bars are relative to the strongest result.");
 
         ImGui.TextDisabled(
-            "Low signal does not prove a dye row is unused.");
+            "Signal is not actual garment dye coverage.");
 
         ImGui.TextDisabled(
-            "Current camera angle and scene movement " +
-            "can affect the result.");
-
-        ImGui.TreePop();
+            "Inconclusive does not mean unused.");
     }
 
     private void AppendAutoRowScanDiagnostics(
