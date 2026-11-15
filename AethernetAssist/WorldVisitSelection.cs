@@ -74,6 +74,13 @@ public sealed unsafe partial class Plugin
                     StringComparison.OrdinalIgnoreCase))
                 return;
 
+            // Keep only meaningful interactions in the trace.
+            // Hovering across multiple rows otherwise fills
+            // the buffer before the user copies diagnostics.
+            if (eventType == "ListItemRollOver" ||
+                eventType == "ListItemRollOut")
+                return;
+
             string selectedDc = "unavailable";
             string selectedWorld = "unavailable";
 
@@ -90,6 +97,30 @@ public sealed unsafe partial class Plugin
                     selectedWorld = worldValue.Int.ToString();
             }
 
+            // The generic event parameter does not contain
+            // the clicked row. ListItemData.SelectedIndex
+            // is supplied separately by the native UI.
+            string listDetails = "";
+
+            if (stage == AddonEvent.PreReceiveEvent &&
+                eventType == "ListItemClick" &&
+                evt.AtkEventData != 0)
+            {
+                var data = (AtkEventData*)evt.AtkEventData;
+
+                int selectedIndex =
+                    data->ListItemData.SelectedIndex;
+
+                short hoveredIndex =
+                    data->ListItemData.HoveredItemIndex3;
+
+                listDetails =
+                    " | SelectedIndex=" + selectedIndex +
+                    " | HoveredIndex=" + hoveredIndex +
+                    " | MouseButton=" +
+                    data->ListItemData.MouseButtonId;
+            }
+
             string record =
                 DateTime.Now.ToString("HH:mm:ss.fff") +
                 " | " + stage +
@@ -97,7 +128,8 @@ public sealed unsafe partial class Plugin
                 " | Event=" + eventType +
                 " | Param=" + evt.EventParam +
                 " | Value11=" + selectedDc +
-                " | Value12=" + selectedWorld;
+                " | Value12=" + selectedWorld +
+                listDetails;
 
             worldVisitNativeInputTrace.Add(record);
 
