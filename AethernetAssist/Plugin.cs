@@ -1952,7 +1952,8 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
              ~AvailableNavigationTabsMask()) != 0)
             return;
 
-        const float width = 386f;
+        float width = currentPage == NavigationPage.DcTravel
+            ? 536f : 386f;
 
         PushTheme();
 
@@ -2081,8 +2082,14 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
                 ImGui.GetCursorPosY() +
                 ImGui.GetStyle().WindowPadding.Y + 3f;
 
+            float pageWidth =
+                currentPage == NavigationPage.DcTravel
+                    ? 536f : 386f;
+
             ImGui.SetWindowSize(
-                new Vector2(width, MathF.Max(132f, naturalHeight)),
+                new Vector2(
+                    pageWidth,
+                    MathF.Max(132f, naturalHeight)),
                 ImGuiCond.Always);
 
             ImGui.End();

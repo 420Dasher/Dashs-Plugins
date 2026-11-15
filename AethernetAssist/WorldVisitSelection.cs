@@ -239,27 +239,17 @@ public sealed unsafe partial class Plugin
         destinations = new List<WorldVisitDestination>();
         error = "";
 
-        if (!WorldVisitPageAvailable())
-        {
-            error = "Not near an eligible main Aetheryte.";
-            return false;
-        }
-
         var addon = GetAddon("WorldTravelSelect");
 
-        if (addon == null ||
+        if (!WorldVisitPageAvailable() ||
+            addon == null ||
             addon->AtkValues == null ||
             addon->AtkValuesCount != 15)
         {
-            error = "Unexpected World Visit native layout.";
+            error = "Native World Visit menu unavailable.";
             return false;
         }
 
-        // Patch 7.58 observations:
-        // Value[0] has been seen as 1 and 2.
-        // Value[11] is 1 for Light and 0 for Chaos.
-        // Value[12] tracks the current-world position.
-        // Only the selected DC is used for this parser.
         if (addon->AtkValues[0].Type != AtkValueType.UInt ||
             (addon->AtkValues[0].UInt != 1 &&
              addon->AtkValues[0].UInt != 2) ||
@@ -267,156 +257,61 @@ public sealed unsafe partial class Plugin
             addon->AtkValues[11].UInt > 1 ||
             addon->AtkValues[12].Type != AtkValueType.Int)
         {
-            error = "Unrecognized Patch 7.58 selector state.";
+            error = "Unexpected Patch 7.58 selector state.";
             return false;
         }
 
-        var player = Objects.LocalPlayer;
-
-        if (player == null)
-        {
-            error = "Player unavailable.";
+        if (!TryBuildEuropeanWorldChoices(
+            out var allWorlds, out error))
             return false;
-        }
 
-        var sheet = Data.GetExcelSheet<World>();
+        bool light = addon->AtkValues[11].UInt == 1;
 
-        uint currentWorldId = player.CurrentWorld.RowId;
-        var current = sheet.GetRow(currentWorldId);
+        var expectedNames = light
+            ? WorldVisitLightNames
+            : WorldVisitChaosNames;
 
-        if (currentWorldId == 0 ||
-            current.DataCenter.RowId == 0)
-        {
-            error = "Current data center unavailable.";
-            return false;
-        }
-
-        // DEV4 is deliberately restricted to the tested
-        // European Light/Chaos pair. Derive DC row IDs
-        // from Lumina rather than hardcoding numeric IDs.
-        var lightAnchors = sheet.Where(x =>
-            x.IsPublic &&
-            string.Equals(
-                x.Name.ToString(),
-                "Raiden",
-                StringComparison.OrdinalIgnoreCase))
-            .Take(2)
-            .ToArray();
-
-        var chaosAnchors = sheet.Where(x =>
-            x.IsPublic &&
-            string.Equals(
-                x.Name.ToString(),
-                "Cerberus",
-                StringComparison.OrdinalIgnoreCase))
-            .Take(2)
-            .ToArray();
-
-        if (lightAnchors.Length != 1 ||
-            chaosAnchors.Length != 1)
-        {
-            error = "EU data center identities ambiguous.";
-            return false;
-        }
-
-        uint lightDc = lightAnchors[0].DataCenter.RowId;
-        uint chaosDc = chaosAnchors[0].DataCenter.RowId;
-
-        if (lightDc == 0 ||
-            chaosDc == 0 ||
-            lightDc == chaosDc ||
-            (current.DataCenter.RowId != lightDc &&
-             current.DataCenter.RowId != chaosDc))
-        {
-            error = "Current region is not the verified EU pair.";
-            return false;
-        }
-
-        uint dcFlag = addon->AtkValues[11].UInt;
-        uint selectedDc = dcFlag == 1 ? lightDc : chaosDc;
-
-        var expected = sheet
-            .Where(x =>
-                x.RowId != 0 &&
-                x.IsPublic &&
-                x.DataCenter.RowId == selectedDc &&
-                !string.IsNullOrWhiteSpace(
-                    x.Name.ToString()))
-            .OrderBy(
-                x => x.Name.ToString(),
-                StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        if (expected.Length != 8 ||
-            expected.Select(x => x.Name.ToString())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Count() != 8)
-        {
-            error = "Expected eight unique destination worlds.";
-            return false;
-        }
-
-        // Unlike WorldTranslate, these are the labels
-        // actually present in the native window.
         var labels = new List<string>();
 
         CollectWorldVisitNativeText(
-            &addon->UldManager,
-            labels);
+            &addon->UldManager, labels);
 
-        var worldLabels = labels
-            .Where(label =>
-                expected.Any(row =>
-                    string.Equals(
-                        row.Name.ToString(),
-                        label,
-                        StringComparison.OrdinalIgnoreCase)))
+        var visibleWorlds = labels
+            .Where(label => expectedNames.Contains(
+                label, StringComparer.OrdinalIgnoreCase))
             .ToArray();
 
-        if (worldLabels.Length != 8)
+        if (visibleWorlds.Length != 8)
         {
-            error =
-                "Native world labels incomplete (" +
-                worldLabels.Length + "/8).";
+            error = "Native world labels incomplete (" +
+                    visibleWorlds.Length + "/8).";
             return false;
         }
 
-        // DEV3 confirmed zero-based list indices in the
-        // displayed alphabetical order. Fail closed if
-        // the UI's reported label order changes.
-        for (int i = 0; i < expected.Length; i++)
+        for (int i = 0; i < 8; i++)
         {
-            var world = expected[i];
-            string name = world.Name.ToString();
-
             if (!string.Equals(
-                worldLabels[i],
-                name,
+                visibleWorlds[i],
+                expectedNames[i],
                 StringComparison.OrdinalIgnoreCase))
             {
-                error =
-                    "Native row order mismatch at index " + i;
+                error = "Native row order mismatch at " + i;
                 destinations.Clear();
                 return false;
             }
 
-            destinations.Add(
-                new WorldVisitDestination(
-                    i,
-                    world.RowId,
-                    name,
-                    world.RowId == currentWorldId));
+            var world = allWorlds.Single(x =>
+                string.Equals(
+                    x.Name, expectedNames[i],
+                    StringComparison.OrdinalIgnoreCase));
+
+            destinations.Add(new WorldVisitDestination(
+                i,
+                world.WorldId,
+                world.Name,
+                world.Current));
         }
 
-        if (destinations.Count(x => x.Current) !=
-            (selectedDc == current.DataCenter.RowId ? 1 : 0))
-        {
-            error = "Current-world identity mismatch.";
-            destinations.Clear();
-            return false;
-        }
-
-        error = "";
         return true;
     }
     private void RefreshWorldVisitDestinations()
@@ -544,102 +439,105 @@ public sealed unsafe partial class Plugin
             ". Awaiting verified confirmation.";
     }
 
+    private uint worldVisitUiSelectedWorldId;
+
+    private void DrawWorldVisitWorldColumn(
+        string dcName,
+        string[] names,
+        float columnWidth)
+    {
+        if (ImGui.BeginChild(
+            "##dc-worlds-" + dcName,
+            new Vector2(columnWidth, 271f),
+            true))
+        {
+            ImGui.TextColored(NavAccent, dcName);
+            ImGui.Separator();
+
+            foreach (string name in names)
+            {
+                var world = worldVisitCachedDestinations
+                    .FirstOrDefault(x =>
+                        string.Equals(
+                            x.Name, name,
+                            StringComparison.OrdinalIgnoreCase));
+
+                if (world == null)
+                {
+                    ImGui.TextDisabled(name + " (unavailable)");
+                    continue;
+                }
+
+                bool enabled =
+                    !world.Current &&
+                    worldVisitPhase == WorldVisitPhase.Idle &&
+                    !IsBusy();
+
+                bool selected =
+                    worldVisitUiSelectedWorldId == world.WorldId;
+
+                if (selected)
+                    ImGui.PushStyleColor(
+                        ImGuiCol.Button, ThemeColor(6));
+
+                ImGui.BeginDisabled(!enabled);
+
+                string label = world.Name +
+                    (world.Current ? " (current)" : "") +
+                    "##world-" + world.WorldId;
+
+                bool clicked = ImGui.Button(
+                    label, new Vector2(-1f, 25f));
+
+                ImGui.EndDisabled();
+
+                if (selected)
+                    ImGui.PopStyleColor();
+
+                if (clicked && enabled)
+                {
+                    worldVisitUiSelectedWorldId = world.WorldId;
+                    StartWorldVisit(world);
+                }
+            }
+        }
+
+        ImGui.EndChild();
+    }
+
     private void DrawWorldVisitSelectionPage()
     {
         ImGui.Spacing();
 
         ImGui.TextColored(
-            NavAccent, "WORLD VISIT - PATCH 7.58");
+            NavAccent, "WORLD VISIT");
 
         ImGui.TextDisabled(
-            "Open the native World Visit window and select Light or Chaos.");
+            "Select a world on Light or Chaos.");
 
         ImGui.Spacing();
 
         RefreshWorldVisitChoices();
 
-        if (worldVisitCachedDestinations.Count == 0)
+        if (worldVisitCachedDestinations.Count != 16)
         {
             ImGui.TextWrapped(
-                "No World Visit destinations available.");
-
-            ImGui.Spacing();
-
+                "World Visit destinations unavailable.");
             ImGui.TextDisabled(worldVisitCachedError);
         }
         else
         {
-            ImGui.TextColored(
-                NavMuted, "AVAILABLE DESTINATIONS");
+            float gap = 8f;
+            float width =
+                (ImGui.GetContentRegionAvail().X - gap) / 2f;
 
-            ImGui.Spacing();
+            DrawWorldVisitWorldColumn(
+                "Light", WorldVisitLightNames, width);
 
-            float rowHeight =
-                26f + ImGui.GetStyle().ItemSpacing.Y;
+            ImGui.SameLine(0f, gap);
 
-            float viewport = Math.Clamp(
-                worldVisitCachedDestinations.Count *
-                    rowHeight + 12f,
-                85f, 300f);
-
-            if (ImGui.BeginChild(
-                "##WorldVisitDestinations",
-                new Vector2(0f, viewport),
-                false))
-            {
-                foreach (var world in worldVisitCachedDestinations)
-                {
-                    // DEV4: display validated destinations
-                    // without sending unverified callbacks.
-                    bool enabled = false;
-
-                    Vector2 pos = ImGui.GetCursorScreenPos();
-
-                    Vector2 size = new(
-                        MathF.Max(100f,
-                            ImGui.GetContentRegionAvail().X - 4f),
-                        26f);
-
-                    bool clicked = ImGui.InvisibleButton(
-                        "##world-visit-" + world.WorldId,
-                        size);
-
-                    bool hovered =
-                        ImGui.IsItemHovered() && enabled;
-
-                    var draw = ImGui.GetWindowDrawList();
-
-                    if (hovered)
-                    {
-                        draw.AddRectFilled(
-                            pos, pos + size,
-                            ImGui.ColorConvertFloat4ToU32(
-                                ThemeColor(6)), 3f);
-                    }
-
-                    string label = world.Current
-                        ? world.Name + "  (current)"
-                        : world.Name;
-
-                    draw.AddText(
-                        pos + new Vector2(10f, 5f),
-                        ImGui.ColorConvertFloat4ToU32(
-                            enabled ? NavAccent : NavMuted),
-                        "\u25C6");
-
-                    draw.AddText(
-                        pos + new Vector2(29f, 5f),
-                        ImGui.ColorConvertFloat4ToU32(
-                            enabled ? ThemeColor(2) :
-                                      ThemeColor(3)),
-                        label);
-
-                    if (clicked && enabled)
-                        StartWorldVisit(world);
-                }
-            }
-
-            ImGui.EndChild();
+            DrawWorldVisitWorldColumn(
+                "Chaos", WorldVisitChaosNames, width);
         }
 
         ImGui.Spacing();
@@ -649,21 +547,15 @@ public sealed unsafe partial class Plugin
 
         if (worldVisitPhase != WorldVisitPhase.Idle)
         {
-            ImGui.Spacing();
-
             if (WorldVisitCanStop())
             {
                 if (ImGui.SmallButton("Stop automation"))
                     TryStopWorldVisitFromUser();
-
-                ImGui.TextDisabled(
-                    "This does not close native game menus.");
             }
             else
             {
-                ImGui.TextWrapped(
-                    "FFXIV controls the transfer after submission. " +
-                    "Queued World Visits cannot be cancelled.");
+                ImGui.TextDisabled(
+                    "FFXIV controls queued transfers.");
             }
         }
 
@@ -672,7 +564,6 @@ public sealed unsafe partial class Plugin
         if (ImGui.SmallButton("Copy diagnostics"))
         {
             ImGui.SetClipboardText(
-
                 BuildWorldVisitSelectionReport() +
                 BuildWorldVisitJourneyReport() +
                 BuildWorldVisitNativeLayoutReport() +
@@ -680,9 +571,8 @@ public sealed unsafe partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "DEV4: Verified destination list only. Travel selection disabled.");
+            "DEV5: Opens native menu; world/transfer confirmation manual.");
     }
-
     private static void CollectWorldVisitNativeText(
         AtkUldManager* manager,
         List<string> results,
@@ -820,6 +710,21 @@ public sealed unsafe partial class Plugin
 
         output.AppendLine(
             "Confirmation handled by World Visit controller.");
+
+        if (GetAddon("WorldTravelSelect") != null)
+        {
+            bool validated = TryReadWorldVisitDestinations(
+                out var nativeWorlds, out var nativeError);
+
+            output.AppendLine(
+                "Native selected DC validation: " +
+                (validated ? "Passed (8 worlds)" : nativeError));
+
+            foreach (var world in nativeWorlds)
+                output.AppendLine(
+                    "Native index " + world.Index +
+                    " | " + world.Name);
+        }
 
         return output.ToString();
     }

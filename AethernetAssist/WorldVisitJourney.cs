@@ -30,6 +30,7 @@ public sealed unsafe partial class Plugin
         Interact,
         SelectVisitMenu,
         SelectWorld,
+        AwaitNativeWorldSelection,
         Confirm,
         ManualConfirmation,
         WaitForArrival
@@ -138,19 +139,102 @@ public sealed unsafe partial class Plugin
     // Display worlds before the native menu opens.
     // This is only a candidate list: the actual target
     // is revalidated against WorldTravelSelect later.
+    private static readonly string[] WorldVisitLightNames =
+    {
+        "Alpha", "Lich", "Odin", "Phoenix",
+        "Raiden", "Shiva", "Twintania", "Zodiark"
+    };
+
+    private static readonly string[] WorldVisitChaosNames =
+    {
+        "Cerberus", "Louisoix", "Moogle", "Omega",
+        "Phantom", "Ragnarok", "Sagittarius", "Spriggan"
+    };
+
+    private static string WorldVisitDcName(string name) =>
+        WorldVisitLightNames.Contains(
+            name, StringComparer.OrdinalIgnoreCase)
+                ? "Light"
+                : WorldVisitChaosNames.Contains(
+                    name, StringComparer.OrdinalIgnoreCase)
+                    ? "Chaos"
+                    : "Unknown";
+
+    private bool TryBuildEuropeanWorldChoices(
+        out List<WorldVisitDestination> result,
+        out string error)
+    {
+        result = new List<WorldVisitDestination>();
+        error = "";
+
+        var player = Objects.LocalPlayer;
+
+        if (player == null)
+        {
+            error = "Player unavailable.";
+            return false;
+        }
+
+        var sheet = Data.GetExcelSheet<World>();
+
+        uint currentId = player.CurrentWorld.RowId;
+
+        var publicWorlds = sheet
+            .Where(x =>
+                x.RowId != 0 &&
+                x.IsPublic &&
+                !string.IsNullOrWhiteSpace(
+                    x.Name.ToString()))
+            .ToArray();
+
+        string[] names = WorldVisitLightNames
+            .Concat(WorldVisitChaosNames)
+            .ToArray();
+
+        foreach (string name in names)
+        {
+            var matches = publicWorlds
+                .Where(x => string.Equals(
+                    x.Name.ToString(),
+                    name,
+                    StringComparison.OrdinalIgnoreCase))
+                .Take(2)
+                .ToArray();
+
+            if (matches.Length != 1)
+            {
+                error = "World identity ambiguous: " + name;
+                result.Clear();
+                return false;
+            }
+
+            var world = matches[0];
+
+            result.Add(new WorldVisitDestination(
+                -1,
+                world.RowId,
+                name,
+                world.RowId == currentId));
+        }
+
+        if (result.Count != 16 ||
+            result.Select(x => x.WorldId).Distinct().Count() != 16 ||
+            result.Count(x => x.Current) != 1)
+        {
+            error = "European destination catalogue incomplete.";
+            result.Clear();
+            return false;
+        }
+
+        return true;
+    }
+
+    // The plugin-side list is independent of the
+    // native window's selected data center.
     private void RefreshWorldVisitChoices()
     {
         if (worldVisitPhase != WorldVisitPhase.Idle)
             return;
-
-        if (GetAddon("WorldTravelSelect") != null)
-        {
-            RefreshWorldVisitDestinations();
-            return;
-        }
-
-        worldVisitPending = false;
-        worldVisitCachedAddon = nint.Zero;
 
         var player = Objects.LocalPlayer;
 
@@ -166,71 +250,26 @@ public sealed unsafe partial class Plugin
         DateTime now = DateTime.UtcNow;
 
         if (worldVisitPrelistWorld == currentId &&
-            (now - worldVisitPrelistUpdated)
-                .TotalMilliseconds < 1500 &&
-            worldVisitCachedDestinations.Count > 0)
+            (now - worldVisitPrelistUpdated).TotalMilliseconds < 1500 &&
+            worldVisitCachedDestinations.Count == 16)
             return;
 
         worldVisitPrelistWorld = currentId;
         worldVisitPrelistUpdated = now;
 
-        worldVisitCachedDestinations.Clear();
-
-        var sheet = Data.GetExcelSheet<World>();
-        var current = sheet.GetRow(currentId);
-
-        uint dc = current.DataCenter.RowId;
-
-        if (currentId == 0 || dc == 0)
+        if (TryBuildEuropeanWorldChoices(
+            out var choices, out var error))
         {
-            worldVisitCachedError =
-                "Could not verify your current data center.";
-            return;
+            worldVisitCachedDestinations.Clear();
+            worldVisitCachedDestinations.AddRange(choices);
+            worldVisitCachedError = "";
         }
-
-        var worlds = sheet
-            .Where(x =>
-                x.RowId != 0 &&
-                x.IsPublic &&
-                x.DataCenter.RowId == dc &&
-                !string.IsNullOrWhiteSpace(
-                    x.Name.ToString()))
-            .OrderBy(
-                x => x.Name.ToString(),
-                StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        // Public data centers normally have at most
-        // eight World Visit destinations. Refuse
-        // ambiguous World-sheet results.
-        if (worlds.Length < 2 || worlds.Length > 8 ||
-            worlds.Count(x => x.RowId == currentId) != 1 ||
-            worlds.Select(x => x.Name.ToString())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Count() != worlds.Length)
+        else
         {
-            worldVisitCachedError =
-                "World sheet returned an ambiguous list (" +
-                worlds.Length + " worlds).";
-
-            return;
+            worldVisitCachedDestinations.Clear();
+            worldVisitCachedError = error;
         }
-
-        for (int i = 0; i < worlds.Length; i++)
-        {
-            var world = worlds[i];
-
-            worldVisitCachedDestinations.Add(
-                new WorldVisitDestination(
-                    -1,
-                    world.RowId,
-                    world.Name.ToString(),
-                    world.RowId == currentId));
-        }
-
-        worldVisitCachedError = "";
     }
-
     private void StartWorldVisit(
         WorldVisitDestination choice)
     {
@@ -254,14 +293,19 @@ public sealed unsafe partial class Plugin
         var to = sheet.GetRow(choice.WorldId);
 
         if (from.RowId == 0 ||
-            from.DataCenter.RowId == 0 ||
             to.RowId == 0 ||
-            from.DataCenter.RowId != to.DataCenter.RowId ||
             to.RowId == from.RowId ||
+            !to.IsPublic ||
             !string.Equals(
                 to.Name.ToString(),
                 choice.Name,
-                StringComparison.OrdinalIgnoreCase))
+                StringComparison.OrdinalIgnoreCase) ||
+            !TryBuildEuropeanWorldChoices(
+                out var verifiedChoices, out string catalogError) ||
+            verifiedChoices.Count(x =>
+                x.WorldId == choice.WorldId &&
+                x.Name == choice.Name &&
+                !x.Current) != 1)
         {
             worldVisitJourneyStatus =
                 "Destination verification failed.";
@@ -296,7 +340,7 @@ public sealed unsafe partial class Plugin
         worldVisitJourneyDetails =
             "From=" + from.Name.ToString() +
             " | To=" + to.Name.ToString() +
-            " | DC=" + from.DataCenter.RowId.ToString();
+            " | Destination DC=" + WorldVisitDcName(choice.Name);
 
         worldVisitJourneyStatus =
             "Preparing World Visit to " + choice.Name + "...";
@@ -424,6 +468,34 @@ public sealed unsafe partial class Plugin
 
         double stageSeconds =
             (now - worldVisitStageStarted).TotalSeconds;
+
+        if (worldVisitPhase ==
+            WorldVisitPhase.AwaitNativeWorldSelection)
+        {
+            // No world selection or travel callback in DEV5.
+            // The native menu is available for manual testing.
+            if (GetAddon("SelectYesno") != null)
+            {
+                worldVisitJourneyStatus =
+                    "Native confirmation opened. " +
+                    "No automatic transfer submitted.";
+                return;
+            }
+
+            if (GetAddon("WorldTravelSelect") != null)
+            {
+                worldVisitJourneyStatus =
+                    "Native menu open: select " +
+                    WorldVisitDcName(target.Name) +
+                    " / " + target.Name +
+                    " manually.";
+                return;
+            }
+
+            StopWorldVisit(
+                "Native World Visit menu closed.");
+            return;
+        }
 
         if (worldVisitPhase == WorldVisitPhase.WaitForArrival)
         {
@@ -570,53 +642,14 @@ public sealed unsafe partial class Plugin
             if (GetAddon("WorldTravelSelect") == null)
                 return;
 
-            // Recheck all native destination names and
-            // current-world identity before selection.
-            if (!TryReadWorldVisitDestinations(
-                out var nativeWorlds, out var error))
-            {
-                worldVisitJourneyStatus = error;
-                return;
-            }
-
-            var matching = nativeWorlds
-                .Where(x =>
-                    x.WorldId == target.WorldId &&
-                    x.Name == target.Name &&
-                    !x.Current)
-                .ToArray();
-
-            if (matching.Length != 1)
-            {
-                StopWorldVisit(
-                    "Requested world not available " +
-                    "in the native list.");
-                return;
-            }
-
-            // Reuse the TEST1 selector already confirmed
-            // to work in game.
-            SelectWorldVisitDestination(matching[0]);
-
-            if (!worldVisitPending)
-            {
-                StopWorldVisit(
-                    "Native world selection rejected.");
-                return;
-            }
-
-            worldVisitJourneyDetails +=
-                " | Selected native index=" +
-                matching[0].Index;
-
-            SetWorldVisitPhase(WorldVisitPhase.Confirm);
+            SetWorldVisitPhase(
+                WorldVisitPhase.AwaitNativeWorldSelection);
 
             worldVisitJourneyStatus =
-                "Verifying confirmation for " +
-                target.Name + "...";
+                "Native menu opened for " + target.Name +
+                ". Manual DC/world selection required in DEV5.";
             return;
         }
-
         if (worldVisitPhase == WorldVisitPhase.Confirm)
         {
             var yesno =
