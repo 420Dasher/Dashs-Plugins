@@ -209,6 +209,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        DisposeAutoRowScan();
         DisposeControlledRowComparison();
         DisposeScreenNoiseMeasurement();
 
@@ -758,6 +759,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void Scan()
     {
+        CancelAutoRowScan();
         CancelControlledRowComparison();
         EndLivePreview("Stopped by rescan.");
 
@@ -868,8 +870,8 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector - DEV7 STAGE 3");
-        sb.AppendLine("Version: 0.0.3.15");
+        sb.AppendLine("Advanced Dye Row Inspector - DEV7 STAGE 4");
+        sb.AppendLine("Version: 0.0.3.16");
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
         sb.AppendLine("Object index: " + actorIndex);
@@ -948,6 +950,7 @@ public sealed partial class Plugin : IDalamudPlugin
         AppendLivePreviewDiagnostics(sb);
         AppendScreenNoiseDiagnostics(sb);
         AppendControlledRowDiagnostics(sb);
+        AppendAutoRowScanDiagnostics(sb);
         sb.AppendLine("[FLAT PENUMBRA RESOURCE SNAPSHOT]");
 
         foreach (var item in flat)

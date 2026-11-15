@@ -272,6 +272,13 @@ public sealed partial class Plugin
 
     private void BeginScreenNoiseMeasurement()
     {
+        if (autoRowScanRunning)
+        {
+            SetScreenNoiseStatus(
+                "Finish the automatic candidate scan first.");
+            return;
+        }
+
         if (controlledRunning)
         {
             SetScreenNoiseStatus(

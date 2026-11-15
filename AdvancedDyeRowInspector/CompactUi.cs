@@ -10,7 +10,7 @@ namespace AdvancedDyeRowInspector;
 
 public sealed partial class Plugin
 {
-    private string compactSlot = "Legs";
+    private string compactSlot = "Body";
     private bool compactAdvanced;
     private bool compactShowMoreRows;
 
@@ -311,6 +311,8 @@ public sealed partial class Plugin
 
         DrawControlledRowDiagnostics(selectedModels);
 
+        DrawAutoRowScanDiagnostics(selectedModels);
+
         DrawMaterialAudit(selectedModels);
 
 
@@ -416,7 +418,7 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "v0.0.3.15  |  Experimental UV analysis");
+            "v0.0.3.16  |  Experimental UV analysis");
 
         ImGui.Spacing();
 
@@ -512,15 +514,24 @@ public sealed partial class Plugin
             return;
         }
 
+        // Retain the user's selected slot across rescans.
+        // Prefer Body only when the previous slot is absent.
         if (!availableSlots.Contains(compactSlot))
-            compactSlot = availableSlots[0];
+            compactSlot = availableSlots.Contains("Body")
+                ? "Body"
+                : availableSlots[0];
 
         ImGui.TextUnformatted("Equipment");
         ImGui.SameLine();
 
         ImGui.SetNextItemWidth(210f);
 
-        if (ImGui.BeginCombo(
+        if (autoRowScanRunning)
+        {
+            ImGui.TextDisabled(
+                compactSlot + " (automatic scan running)");
+        }
+        else if (ImGui.BeginCombo(
             "##ADRIEquipment", compactSlot))
         {
             foreach (string slot in availableSlots)

@@ -452,16 +452,29 @@ public sealed partial class Plugin
         ImGui.TextUnformatted(
             "Experimental: temporary row highlight");
 
-        ImGui.SliderInt(
-            "Row (1A-16B)##ADRIRow",
-            ref selectedPreviewRow,
-            0,
-            31);
+        if (!autoRowScanRunning)
+        {
+            ImGui.SliderInt(
+                "Row (1A-16B)##ADRIRow",
+                ref selectedPreviewRow,
+                0,
+                31);
+        }
+        else
+        {
+            ImGui.TextDisabled(
+                "Automatic candidate scan selects the row.");
+        }
 
         ImGui.TextDisabled(
             "Selected: " + PreviewRowName(selectedPreviewRow));
 
-        if (controlledRunning)
+        if (autoRowScanRunning)
+        {
+            ImGui.TextDisabled(
+                "Automatic candidate scan in progress.");
+        }
+        else if (controlledRunning)
         {
             ImGui.TextDisabled(
                 "Controlled comparison in progress.");

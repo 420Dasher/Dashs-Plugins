@@ -370,6 +370,13 @@ public sealed partial class Plugin
     private void BeginControlledRowComparison(
         List<ModelEntry> selectedModels)
     {
+        if (autoRowScanRunning && !autoRowScanInternalStart)
+        {
+            SetControlledStatus(
+                "Automatic candidate scan is running.");
+            return;
+        }
+
         if (controlledRunning ||
             screenNoiseRunning ||
             activeLivePreview.HasValue ||
@@ -806,7 +813,7 @@ public sealed partial class Plugin
 
         // Shared with the existing manual-preview
         // selector, so both always use the same row.
-        if (!controlledRunning)
+        if (!controlledRunning && !autoRowScanRunning)
         {
             ImGui.SliderInt(
                 "Dye row##ADRIControlledRow",
@@ -822,7 +829,12 @@ public sealed partial class Plugin
         ImGui.TextDisabled(
             "One click performs three trials.");
 
-        if (controlledRunning)
+        if (autoRowScanRunning)
+        {
+            ImGui.TextDisabled(
+                "Automatic candidate scan controls the comparison.");
+        }
+        else if (controlledRunning)
         {
             if (ImGui.SmallButton(
                 "Cancel comparison##ADRICompareCancel"))
