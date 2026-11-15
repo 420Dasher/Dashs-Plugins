@@ -180,11 +180,11 @@
     "Name":  "AdvancedDyeRowInspector",
     "InternalName":  "AdvancedDyeRowInspector",
     "AssemblyVersion":  "0.0.0.0",
-    "TestingAssemblyVersion":  "0.0.3.18",
+    "TestingAssemblyVersion":  "0.0.3.19",
     "Description":  "Read-only inspector for loaded character models, materials and candidate ID textures. Exact colorset row identification is planned for later development.",
     "Punchline":  "Inspect the materials behind your outfit.",
     "Changelog":  "Initial testing-only build.",
-    "TestingChangelog":  "DEV7 Stage 6: Simplifies ADRI compact UI, moves automatic five-row visual checking into the main material view, shows UV influence beside noise-adjusted visual signals, collapses UV-only details after checking, consolidates older test tools under troubleshooting, and suppresses stale results after rescanning. No changes to GPU texture operations.",
+    "TestingChangelog":  "DEV7 Stage 7: Refines compact scan confidence labels to distinguish inconclusive high-signal measurements from genuinely low signals, explains control noise and scene drift, preserves extra reliability diagnostics, and reduces redundant UI explanations. UV scanning, comparison thresholds and native texture handling unchanged.",
     "ApplicableVersion":  "any",
     "Tags":  [
                  "glamour",
@@ -204,6 +204,6 @@
     "DownloadLinkInstall":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkUpdate":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkTesting":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
-    "LastUpdate":  1794707504
+    "LastUpdate":  1794708080
 }
 ]
