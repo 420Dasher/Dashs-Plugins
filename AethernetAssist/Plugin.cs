@@ -170,6 +170,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         LoadCosmicLocalNetworks();
         LoadOverworldAetherytes();
         InitializeMapClickResearch();
+        InitializeWorldVisitNativeResearch();
 
         Commands.AddHandler("/anet", new CommandInfo(OnCommand)
         {
@@ -194,6 +195,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         StopCosmicPath();
         // Temporary native addon capture removed.
         cosmicPhase = CosmicPhase.Idle;
+        DisposeWorldVisitNativeResearch();
         DisposeMapClickResearch();
         Framework.Update -= Update;
 

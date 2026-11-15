@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Game.Addon.Lifecycle;
+using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Memory;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Component.GUI;
@@ -18,6 +20,124 @@ public sealed unsafe partial class Plugin
         string Name,
         bool Current
     );
+
+    private readonly List<string> worldVisitNativeInputTrace = new();
+
+    private void InitializeWorldVisitNativeResearch()
+    {
+        AddonLifecycle.RegisterListener(
+            AddonEvent.PreReceiveEvent,
+            new[] { "WorldTravelSelect", "SelectString" },
+            OnWorldVisitNativeInput
+        );
+
+        AddonLifecycle.RegisterListener(
+            AddonEvent.PostReceiveEvent,
+            new[] { "WorldTravelSelect", "SelectString" },
+            OnWorldVisitNativeInput
+        );
+    }
+
+    private void DisposeWorldVisitNativeResearch()
+    {
+        AddonLifecycle.UnregisterListener(
+            OnWorldVisitNativeInput
+        );
+    }
+
+    private void OnWorldVisitNativeInput(
+        AddonEvent stage,
+        AddonArgs args)
+    {
+        if (args is not AddonReceiveEventArgs evt)
+            return;
+
+        try
+        {
+            var addon = GetAddon("WorldTravelSelect");
+
+            if (addon == null)
+                return;
+
+            string eventType = evt.AtkEventType.ToString();
+
+            // Do not fill the trace with mouse movements
+            // and hover notifications.
+            if (eventType.Contains(
+                    "MouseMove",
+                    StringComparison.OrdinalIgnoreCase) ||
+                eventType.Contains(
+                    "MouseOver",
+                    StringComparison.OrdinalIgnoreCase) ||
+                eventType.Contains(
+                    "MouseOut",
+                    StringComparison.OrdinalIgnoreCase))
+                return;
+
+            string selectedDc = "unavailable";
+            string selectedWorld = "unavailable";
+
+            if (addon->AtkValues != null &&
+                addon->AtkValuesCount >= 13)
+            {
+                var dcValue = addon->AtkValues[11];
+                var worldValue = addon->AtkValues[12];
+
+                if (dcValue.Type == AtkValueType.UInt)
+                    selectedDc = dcValue.UInt.ToString();
+
+                if (worldValue.Type == AtkValueType.Int)
+                    selectedWorld = worldValue.Int.ToString();
+            }
+
+            string record =
+                DateTime.Now.ToString("HH:mm:ss.fff") +
+                " | " + stage +
+                " | Addon=" + args.AddonName +
+                " | Event=" + eventType +
+                " | Param=" + evt.EventParam +
+                " | Value11=" + selectedDc +
+                " | Value12=" + selectedWorld;
+
+            worldVisitNativeInputTrace.Add(record);
+
+            if (worldVisitNativeInputTrace.Count > 64)
+                worldVisitNativeInputTrace.RemoveAt(0);
+        }
+        catch (Exception ex)
+        {
+            // Observational only. Never interrupt the
+            // native menu or change its event processing.
+            Log.Warning(
+                "World Visit native event observation failed: " +
+                ex.Message
+            );
+        }
+    }
+
+    private string BuildWorldVisitNativeInputReport()
+    {
+        var report = new System.Text.StringBuilder();
+
+        report.AppendLine();
+        report.AppendLine(
+            "=== PATCH 7.58 WORLD VISIT INPUT EVENTS ==="
+        );
+
+        report.AppendLine(
+            "Captured events: " +
+            worldVisitNativeInputTrace.Count
+        );
+
+        foreach (var record in worldVisitNativeInputTrace)
+            report.AppendLine(record);
+
+        report.AppendLine(
+            "Observation only. No events intercepted or modified."
+        );
+
+        return report.ToString();
+    }
 
     private string worldVisitSelectionStatus =
         "No native destination selected this session.";
@@ -494,7 +614,8 @@ public sealed unsafe partial class Plugin
 
                 BuildWorldVisitSelectionReport() +
                 BuildWorldVisitJourneyReport() +
-                BuildWorldVisitNativeLayoutReport());
+                BuildWorldVisitNativeLayoutReport() +
+                BuildWorldVisitNativeInputReport());
         }
 
         ImGui.TextDisabled(
