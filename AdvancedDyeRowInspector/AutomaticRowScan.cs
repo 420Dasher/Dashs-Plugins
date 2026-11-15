@@ -30,6 +30,8 @@ public sealed partial class Plugin
         double ControlMedian,
         double NetSignal,
         int Retries,
+        int UnstableTrials,
+        double BaselineStrongPercent,
         string Assessment);
 
     private readonly object autoRowScanGate = new();
@@ -371,6 +373,8 @@ public sealed partial class Plugin
                     controlMedian,
                     Math.Max(0.0, coreMedian - controlMedian),
                     retries,
+                    unstableTrials,
+                    summary.BaselineStrongPercent,
                     assessment);
 
                 lock (autoRowScanGate)
@@ -508,21 +512,83 @@ public sealed partial class Plugin
     }
 
     private static string CompactSignalAssessment(
-        string assessment)
+        AutoRowResult result)
     {
-        if (assessment.StartsWith(
-            "Strong", StringComparison.OrdinalIgnoreCase))
+        // Preserve the actual underlying assessment.
+        // A large numeric signal is NOT automatically
+        // reliable if the scanner found scene instability.
+        if (result.Assessment.StartsWith(
+            "Inconclusive",
+            StringComparison.OrdinalIgnoreCase))
+        {
+            return result.NetSignal >= 3.0
+                ? "High signal - inconclusive"
+                : "Inconclusive - scene noise";
+        }
+
+        if (result.Assessment.StartsWith(
+            "Strong",
+            StringComparison.OrdinalIgnoreCase))
         {
             return "Strong comparative signal";
         }
 
-        if (assessment.StartsWith(
-            "Possible", StringComparison.OrdinalIgnoreCase))
+        if (result.Assessment.StartsWith(
+            "Possible",
+            StringComparison.OrdinalIgnoreCase))
         {
             return "Possible visible effect";
         }
 
-        return "Inconclusive / low signal";
+        return "Low observed change";
+    }
+
+    private static string CompactSignalReason(
+        AutoRowResult result)
+    {
+        var reasons = new List<string>();
+
+        if (result.UnstableTrials > 0)
+        {
+            reasons.Add(
+                "unstable trial after retry limit");
+        }
+
+        if (result.CoreMax - result.CoreMin > 2.5)
+        {
+            reasons.Add(
+                "large variation between trials");
+        }
+
+        if (result.ControlMedian > 3.0)
+        {
+            reasons.Add(
+                "high no-change control");
+        }
+
+        double drift = Math.Abs(
+            result.RestoredMean - result.BaselineMean);
+
+        if (drift > Math.Max(
+            4.0, result.BaselineMean * 0.4))
+        {
+            reasons.Add(
+                "scene drift after restoration");
+        }
+
+        if (result.BaselineStrongPercent > 12.0)
+        {
+            reasons.Add(
+                "high natural scene movement");
+        }
+
+        if (reasons.Count == 0)
+        {
+            return "Measurement reliability was limited.";
+        }
+
+        return "Uncertain because of " +
+            string.Join("; ", reasons) + ".";
     }
 
     private void DrawCompactAutoScan(
@@ -621,7 +687,17 @@ public sealed partial class Plugin
                 $"UV {result.UvPercent:F1}%");
 
             ImGui.TextDisabled(
-                CompactSignalAssessment(result.Assessment));
+                CompactSignalAssessment(result));
+
+            // Only show extra explanations when the
+            // measurement itself was judged unreliable.
+            if (result.Assessment.StartsWith(
+                "Inconclusive",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                ImGui.TextWrapped(
+                    CompactSignalReason(result));
+            }
 
             if (result.Retries > 0)
             {
@@ -654,20 +730,17 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "Bars are relative to the strongest result.");
+            "Bars scaled to strongest signal; not dye coverage.");
 
         ImGui.TextDisabled(
-            "Signal is not actual garment dye coverage.");
-
-        ImGui.TextDisabled(
-            "Inconclusive does not mean unused.");
+            "Low or inconclusive does not mean unused.");
     }
 
     private void AppendAutoRowScanDiagnostics(
         StringBuilder sb)
     {
         sb.AppendLine(
-            "[DEV7 STAGE 5 AUTOMATIC CANDIDATE SCAN]");
+            "[DEV7 STAGE 7 AUTOMATIC CANDIDATE SCAN]");
 
         lock (autoRowScanGate)
         {
@@ -693,6 +766,8 @@ public sealed partial class Plugin
                     $"control {row.ControlMedian:F3}%; " +
                     $"net {row.NetSignal:F3}%; " +
                     $"retries {row.Retries}; " +
+                    $"unstable trials {row.UnstableTrials}; " +
+                    $"baseline strong {row.BaselineStrongPercent:F3}%; " +
                     row.Assessment);
             }
         }
