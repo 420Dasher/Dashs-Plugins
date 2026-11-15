@@ -95,11 +95,21 @@ public sealed unsafe partial class Plugin
 
         var addon = GetAddon("WorldTravelSelect");
 
-        if (addon == null ||
-            addon->AtkValues == null ||
-            addon->AtkValuesCount != 15)
+        if (addon == null || addon->AtkValues == null)
         {
             error = "WorldTravelSelect is not ready.";
+            return false;
+        }
+
+        // The pre-7.58 selector used 15 values.
+        // Do not run the old native selector against a
+        // changed layout until its callbacks are verified.
+        if (addon->AtkValuesCount != 15)
+        {
+            error =
+                "Patch 7.58 native layout requires inspection (" +
+                addon->AtkValuesCount +
+                " values). Copy diagnostics with the menu open.";
             return false;
         }
 
@@ -265,6 +275,19 @@ public sealed unsafe partial class Plugin
     }
 
     private void SelectWorldVisitDestination(
+        WorldVisitDestination selected)
+    {
+        // Patch 7.58 DEV1: the DC dropdown changes the
+        // native selector. Never guess callback indices.
+        // Resume automatic World Visit only after mapping
+        // and validating the new native menu.
+        worldVisitSelectionStatus =
+            "Patch 7.58 native World Visit selection " +
+            "is awaiting compatibility verification.";
+        return;
+    }
+
+    private void SelectWorldVisitDestinationLegacy(
         WorldVisitDestination selected)
     {
         if (worldVisitPending || IsBusy())
@@ -470,13 +493,114 @@ public sealed unsafe partial class Plugin
             ImGui.SetClipboardText(
 
                 BuildWorldVisitSelectionReport() +
-                BuildWorldVisitJourneyReport());
+                BuildWorldVisitJourneyReport() +
+                BuildWorldVisitNativeLayoutReport());
         }
 
         ImGui.TextDisabled(
             "Same-DC only. Native confirmation is verified.");
     }
 
+    private static void CollectWorldVisitNativeText(
+        AtkUldManager* manager,
+        List<string> results,
+        int depth = 0)
+    {
+        if (manager == null ||
+            manager->NodeList == null ||
+            depth > 4 ||
+            results.Count >= 80)
+            return;
+
+        for (int i = 0;
+             i < manager->NodeListCount && results.Count < 80;
+             i++)
+        {
+            var node = manager->NodeList[i];
+
+            if (node == null)
+                continue;
+
+            if (node->Type == NodeType.Text)
+            {
+                string label = ((AtkTextNode*)node)
+                    ->NodeText.ToString().Trim();
+
+                if (!string.IsNullOrWhiteSpace(label) &&
+                    !results.Contains(label))
+                    results.Add(label);
+            }
+            else if ((int)node->Type > 1000)
+            {
+                var component =
+                    ((AtkComponentNode*)node)->Component;
+
+                if (component != null)
+                {
+                    CollectWorldVisitNativeText(
+                        &component->UldManager,
+                        results,
+                        depth + 1);
+                }
+            }
+        }
+    }
+
+    private string BuildWorldVisitNativeLayoutReport()
+    {
+        var report = new System.Text.StringBuilder();
+
+        report.AppendLine();
+        report.AppendLine("=== PATCH 7.58 WORLD VISIT NATIVE LAYOUT ===");
+
+        var addon = GetAddon("WorldTravelSelect");
+
+        if (addon == null)
+        {
+            report.AppendLine("WorldTravelSelect: not open.");
+            return report.ToString();
+        }
+
+        report.AppendLine("WorldTravelSelect: visible.");
+        report.AppendLine(
+            "AtkValuesCount: " + addon->AtkValuesCount);
+
+        if (addon->AtkValues != null)
+        {
+            int count = Math.Min(
+                (int)addon->AtkValuesCount, 32);
+
+            for (int i = 0; i < count; i++)
+            {
+                var value = addon->AtkValues[i];
+                string detail = "";
+
+                if (value.Type == AtkValueType.Int)
+                    detail = value.Int.ToString();
+                else if (value.Type == AtkValueType.UInt)
+                    detail = value.UInt.ToString();
+
+                report.AppendLine(
+                    "AtkValue[" + i + "] " +
+                    value.Type + " " + detail);
+            }
+        }
+
+        var labels = new List<string>();
+
+        CollectWorldVisitNativeText(
+            &addon->UldManager, labels);
+
+        report.AppendLine("Visible native text labels:");
+
+        foreach (string label in labels)
+            report.AppendLine("  " + label);
+
+        report.AppendLine(
+            "Diagnostic only: no native selection callback sent.");
+
+        return report.ToString();
+    }
     private string BuildWorldVisitSelectionReport()
     {
         var output = new System.Text.StringBuilder();
