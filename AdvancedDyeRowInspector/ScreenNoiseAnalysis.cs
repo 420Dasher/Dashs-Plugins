@@ -272,6 +272,13 @@ public sealed partial class Plugin
 
     private void BeginScreenNoiseMeasurement()
     {
+        if (controlledRunning)
+        {
+            SetScreenNoiseStatus(
+                "Finish the controlled comparison first.");
+            return;
+        }
+
         if (activeLivePreview.HasValue ||
             pendingLivePreview.HasValue)
         {

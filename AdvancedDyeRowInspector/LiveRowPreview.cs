@@ -228,8 +228,19 @@ public sealed partial class Plugin
             return;
         }
 
-        Half[] values =
-            materialHandle->ColorTableSpan.ToArray();
+        // The controlled comparison supplies the actual
+        // GPU colorset, including existing overrides.
+        if (controlledSourceValues != null &&
+            (nint)original != controlledOriginalTexture)
+        {
+            livePreviewStatus =
+                "Live colorset changed during comparison.";
+            return;
+        }
+
+        Half[] values = controlledSourceValues != null
+            ? (Half[])controlledSourceValues.Clone()
+            : materialHandle->ColorTableSpan.ToArray();
 
         int offset = request.Row * 32;
 
@@ -450,7 +461,12 @@ public sealed partial class Plugin
         ImGui.TextDisabled(
             "Selected: " + PreviewRowName(selectedPreviewRow));
 
-        if (screenNoiseRunning)
+        if (controlledRunning)
+        {
+            ImGui.TextDisabled(
+                "Controlled comparison in progress.");
+        }
+        else if (screenNoiseRunning)
         {
             ImGui.TextDisabled(
                 "Finish screen capture before highlighting.");

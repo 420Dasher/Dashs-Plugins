@@ -44,6 +44,9 @@ public sealed partial class Plugin : IDalamudPlugin
     [PluginService]
     private static IFramework Framework { get; set; } = null!;
 
+    [PluginService]
+    private static IGameGui GameGui { get; set; } = null!;
+
     // Confirmed Penumbra API V5 signatures.
     private readonly ICallGateSubscriber<
         bool, ushort[], JObject?[]> treeIpc;
@@ -206,6 +209,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        DisposeControlledRowComparison();
         DisposeScreenNoiseMeasurement();
 
         Framework.Update -= OnLivePreviewFramework;
@@ -754,6 +758,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void Scan()
     {
+        CancelControlledRowComparison();
         EndLivePreview("Stopped by rescan.");
 
         scanned = true;
@@ -863,8 +868,8 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector - DEV7 STAGE 1");
-        sb.AppendLine("Version: 0.0.3.13");
+        sb.AppendLine("Advanced Dye Row Inspector - DEV7 STAGE 2");
+        sb.AppendLine("Version: 0.0.3.14");
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
         sb.AppendLine("Object index: " + actorIndex);
@@ -942,6 +947,7 @@ public sealed partial class Plugin : IDalamudPlugin
         AppendPreviewTargetDiagnostics(sb);
         AppendLivePreviewDiagnostics(sb);
         AppendScreenNoiseDiagnostics(sb);
+        AppendControlledRowDiagnostics(sb);
         sb.AppendLine("[FLAT PENUMBRA RESOURCE SNAPSHOT]");
 
         foreach (var item in flat)

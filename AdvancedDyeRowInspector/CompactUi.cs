@@ -309,6 +309,8 @@ public sealed partial class Plugin
 
         DrawScreenNoiseDiagnostics();
 
+        DrawControlledRowDiagnostics(selectedModels);
+
         DrawMaterialAudit(selectedModels);
 
 
@@ -414,7 +416,7 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "v0.0.3.13  |  Experimental UV analysis");
+            "v0.0.3.14  |  Experimental UV analysis");
 
         ImGui.Spacing();
 
