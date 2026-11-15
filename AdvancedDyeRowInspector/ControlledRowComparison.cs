@@ -63,6 +63,19 @@ public sealed partial class Plugin
     private string controlledStatus = "Not measured.";
     private ControlledRowResult? controlledResult;
 
+    private int controlledTrials;
+    private double controlledOuterMedian;
+    private double controlledOuterMin;
+    private double controlledOuterMax;
+    private double controlledCoreMean;
+    private double controlledCoreMedian;
+    private double controlledCoreMin;
+    private double controlledCoreMax;
+    private double controlledCoreBaseline;
+    private double controlledCoreRestored;
+    private int controlledCoreWidth;
+    private int controlledCoreHeight;
+
     // Used only for the automatic comparison.
     // The existing manual preview keeps its current behavior.
     private Half[]? controlledSourceValues;
@@ -396,15 +409,43 @@ public sealed partial class Plugin
             controlledCancellation = source;
             controlledRunning = true;
             controlledResult = null;
+            controlledTrials = 0;
+            controlledOuterMedian = 0;
+            controlledOuterMin = 0;
+            controlledOuterMax = 0;
+            controlledCoreMean = 0;
+            controlledCoreMedian = 0;
+            controlledCoreMin = 0;
+            controlledCoreMax = 0;
+            controlledCoreBaseline = 0;
+            controlledCoreRestored = 0;
+            controlledCoreWidth = 0;
+            controlledCoreHeight = 0;
 
             controlledStatus =
-                "Capturing unmodified baseline...";
+                "Starting three comparison trials...";
         }
 
         uint viewport = ImGui.GetMainViewport().ID;
 
         _ = RunControlledRowComparisonAsync(
             viewport, region, borrow, source);
+    }
+
+    private static ActorRegion CoreControlledRegion(
+        ActorRegion region)
+    {
+        // Center-weighted approximation only.
+        // It excludes more surrounding scenery but
+        // is NOT a character silhouette or visibility mask.
+        int insetX = Math.Max(8, region.Width * 16 / 100);
+        int insetY = Math.Max(10, region.Height * 10 / 100);
+
+        return new ActorRegion(
+            region.Left + insetX,
+            region.Top + insetY,
+            region.Right - insetX,
+            region.Bottom - insetY);
     }
 
     private async Task RunControlledRowComparisonAsync(
@@ -414,113 +455,234 @@ public sealed partial class Plugin
         CancellationTokenSource source)
     {
         var token = source.Token;
+        var coreRegion = CoreControlledRegion(region);
+
+        var outerResults = new List<ControlledRowResult>(3);
+        var coreResults = new List<ControlledRowResult>(3);
+
+        string rowName = PreviewRowName(borrow.Target.Row);
 
         try
         {
-            // Two untouched frames establish local noise.
-            var first = await CaptureScreenFrameAsync(
-                viewport, token).ConfigureAwait(false);
-
-            await Task.Delay(
-                250, token).ConfigureAwait(false);
-
-            var second = await CaptureScreenFrameAsync(
-                viewport, token).ConfigureAwait(false);
-
-            SetControlledStatus(
-                "Reading actual GPU colorset...");
-
-            // Preserve all live values, including Glamourer
-            // overrides. Do not fall back to the base MTRL.
-            var (spec, pixels) = await Readback
-                .GetRawImageAsync(
-                    borrow.Wrap,
-                    leaveWrapOpen: true,
-                    cancellationToken: token)
-                .ConfigureAwait(false);
-
-            var current = DecodeGpuColorset(
-                spec.Width,
-                spec.Height,
-                spec.DxgiFormat,
-                spec.Pitch,
-                pixels);
-
-            SetControlledStatus(
-                "Applying one-row temporary highlight...");
-
-            await Framework.RunOnTick(() =>
+            // Every trial repeats the complete cycle:
+            // baseline A -> baseline B -> highlight
+            // -> restore -> post-restoration capture.
+            //
+            // The borrowed original texture is held
+            // until the entire three-trial run ends.
+            for (int trial = 0; trial < 3; trial++)
             {
-                if (!windowOpen ||
-                    !TryConfirmBorrowedTarget(borrow))
+                token.ThrowIfCancellationRequested();
+
+                SetControlledStatus(
+                    $"Trial {trial + 1}/3: capturing baseline...");
+
+                bool valid = await Framework.RunOnTick(
+                    () => windowOpen &&
+                          TryConfirmBorrowedTarget(borrow),
+                    cancellationToken: token)
+                    .ConfigureAwait(false);
+
+                if (!valid)
                 {
                     throw new InvalidOperationException(
-                        "Actor or colorset changed; aborting.");
+                        "Actor or original colorset changed. " +
+                        "Comparison stopped.");
                 }
 
-                controlledSourceValues = current;
+                var beforeA = await CaptureScreenFrameAsync(
+                    viewport, token).ConfigureAwait(false);
 
-                controlledOriginalTexture =
-                    borrow.NativeTexture;
+                await Task.Delay(
+                    250, token).ConfigureAwait(false);
 
-                pendingLivePreview = borrow.Target;
-                cancelLivePreview = false;
+                var beforeB = await CaptureScreenFrameAsync(
+                    viewport, token).ConfigureAwait(false);
 
-            }, cancellationToken: token)
-                .ConfigureAwait(false);
+                SetControlledStatus(
+                    $"Trial {trial + 1}/3: reading GPU colorset...");
 
-            // Allow the existing framework preview
-            // callback to install the temporary texture.
-            await Framework.DelayTicks(
-                3, token).ConfigureAwait(false);
+                // Read the ACTUAL GPU colorset again for
+                // every trial. Never reuse stale values.
+                var (spec, pixels) = await Readback
+                    .GetRawImageAsync(
+                        borrow.Wrap,
+                        leaveWrapOpen: true,
+                        cancellationToken: token)
+                    .ConfigureAwait(false);
 
-            bool started = await Framework.RunOnTick(
-                () => activeLivePreview.HasValue &&
-                      activeLivePreview.Value == borrow.Target,
-                cancellationToken: token)
-                .ConfigureAwait(false);
+                var current = DecodeGpuColorset(
+                    spec.Width,
+                    spec.Height,
+                    spec.DxgiFormat,
+                    spec.Pitch,
+                    pixels);
 
-            if (!started)
-            {
-                throw new InvalidOperationException(
-                    "Live highlight did not activate: " +
-                    livePreviewStatus);
+                SetControlledStatus(
+                    $"Trial {trial + 1}/3: highlighting {rowName}...");
+
+                await Framework.RunOnTick(() =>
+                {
+                    if (!windowOpen ||
+                        !TryConfirmBorrowedTarget(borrow))
+                    {
+                        throw new InvalidOperationException(
+                            "Material changed during capture.");
+                    }
+
+                    controlledSourceValues = current;
+                    controlledOriginalTexture =
+                        borrow.NativeTexture;
+
+                    pendingLivePreview = borrow.Target;
+                    cancelLivePreview = false;
+
+                }, cancellationToken: token)
+                    .ConfigureAwait(false);
+
+                await Framework.DelayTicks(
+                    3, token).ConfigureAwait(false);
+
+                bool started = await Framework.RunOnTick(
+                    () => activeLivePreview.HasValue &&
+                          activeLivePreview.Value == borrow.Target,
+                    cancellationToken: token)
+                    .ConfigureAwait(false);
+
+                if (!started)
+                {
+                    throw new InvalidOperationException(
+                        "Highlight did not activate: " +
+                        livePreviewStatus);
+                }
+
+                await Task.Delay(
+                    230, token).ConfigureAwait(false);
+
+                var highlighted = await CaptureScreenFrameAsync(
+                    viewport, token).ConfigureAwait(false);
+
+                SetControlledStatus(
+                    $"Trial {trial + 1}/3: restoring colorset...");
+
+                // Require a verified successful restoration
+                // before accepting this trial or starting
+                // the next one.
+                bool restoredSuccessfully =
+                    await Framework.RunOnTick(() =>
+                    {
+                        EndLivePreview(
+                            $"DEV7 trial {trial + 1} complete.");
+
+                        controlledSourceValues = null;
+                        controlledOriginalTexture = nint.Zero;
+
+                        return livePreviewStatus.Contains(
+                            "Original texture restored.",
+                            StringComparison.Ordinal);
+
+                    }, cancellationToken: token)
+                    .ConfigureAwait(false);
+
+                if (!restoredSuccessfully)
+                {
+                    throw new InvalidOperationException(
+                        "Original colorset restoration could " +
+                        "not be confirmed. Comparison stopped.");
+                }
+
+                await Task.Delay(
+                    180, token).ConfigureAwait(false);
+
+                var after = await CaptureScreenFrameAsync(
+                    viewport, token).ConfigureAwait(false);
+
+                var outer = CompareControlledFrames(
+                    beforeA,
+                    beforeB,
+                    highlighted,
+                    after,
+                    region,
+                    rowName);
+
+                var core = CompareControlledFrames(
+                    beforeA,
+                    beforeB,
+                    highlighted,
+                    after,
+                    coreRegion,
+                    rowName);
+
+                outerResults.Add(outer);
+                coreResults.Add(core);
+
+                // Briefly settle the scene between tests.
+                if (trial != 2)
+                {
+                    await Task.Delay(
+                        220, token).ConfigureAwait(false);
+                }
             }
 
-            await Task.Delay(
-                230, token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
 
-            var during = await CaptureScreenFrameAsync(
-                viewport, token).ConfigureAwait(false);
+            var outerScores = outerResults
+                .Select(r => r.NoiseAdjustedPercent)
+                .OrderBy(v => v)
+                .ToArray();
 
-            await Framework.RunOnTick(
-                () => EndLivePreview(
-                    "DEV7 controlled capture finished."),
-                cancellationToken: token)
-                .ConfigureAwait(false);
+            var coreScores = coreResults
+                .Select(r => r.NoiseAdjustedPercent)
+                .OrderBy(v => v)
+                .ToArray();
 
-            await Task.Delay(
-                180, token).ConfigureAwait(false);
-
-            var after = await CaptureScreenFrameAsync(
-                viewport, token).ConfigureAwait(false);
-
-            var result = CompareControlledFrames(
-                first,
-                second,
-                during,
-                after,
+            // Keep the established result layout,
+            // now populated with three-trial averages.
+            var combined = new ControlledRowResult(
+                rowName,
                 region,
-                PreviewRowName(borrow.Target.Row));
+                (long)outerResults.Average(r => r.Samples),
+                outerResults.Average(r => r.BaselineMean),
+                outerResults.Average(r => r.PreviewMean),
+                outerResults.Average(r => r.RestoredMean),
+                outerResults.Average(
+                    r => r.BaselineStrongPercent),
+                outerResults.Average(
+                    r => r.PreviewStrongPercent),
+                outerResults.Average(
+                    r => r.NoiseAdjustedPercent));
 
             lock (controlledGate)
             {
                 if (!controlledDisposed &&
                     !token.IsCancellationRequested)
                 {
-                    controlledResult = result;
+                    controlledResult = combined;
+                    controlledTrials = outerResults.Count;
+
+                    controlledOuterMin = outerScores[0];
+                    controlledOuterMedian = outerScores[1];
+                    controlledOuterMax = outerScores[2];
+
+                    controlledCoreMean = coreResults.Average(
+                        r => r.NoiseAdjustedPercent);
+
+                    controlledCoreMin = coreScores[0];
+                    controlledCoreMedian = coreScores[1];
+                    controlledCoreMax = coreScores[2];
+
+                    controlledCoreBaseline = coreResults.Average(
+                        r => r.BaselineMean);
+
+                    controlledCoreRestored = coreResults.Average(
+                        r => r.RestoredMean);
+
+                    controlledCoreWidth = coreRegion.Width;
+                    controlledCoreHeight = coreRegion.Height;
+
                     controlledStatus =
-                        "Controlled comparison complete (experimental).";
+                        "Three comparison trials complete " +
+                        "(experimental).";
                 }
             }
         }
@@ -536,22 +698,21 @@ public sealed partial class Plugin
                 ex.GetType().Name + ": " + ex.Message);
 
             Log.Warning(
-                $"ADRI controlled row comparison failed: {ex}");
+                $"ADRI repeated comparison failed: {ex}");
         }
         finally
         {
             try
             {
-                // Native cleanup must run on the framework.
-                // Existing DEV6 logic validates the pointer
-                // before restoring the original slot value.
+                // Always release the borrowed texture on
+                // the game's framework thread.
                 await Framework.RunOnFrameworkThread(() =>
                 {
                     if (activeLivePreview is { } active &&
                         active == borrow.Target)
                     {
                         EndLivePreview(
-                            "DEV7 comparison cleanup.");
+                            "DEV7 repeated comparison cleanup.");
                     }
 
                     if (pendingLivePreview is { } pending &&
@@ -571,7 +732,7 @@ public sealed partial class Plugin
             catch (Exception cleanup)
             {
                 Log.Warning(
-                    $"ADRI controlled comparison cleanup failed: {cleanup}");
+                    $"ADRI comparison cleanup failed: {cleanup}");
             }
 
             lock (controlledGate)
@@ -643,6 +804,24 @@ public sealed partial class Plugin
             "Uses approximate character bounds; " +
             "background may remain.");
 
+        // Shared with the existing manual-preview
+        // selector, so both always use the same row.
+        if (!controlledRunning)
+        {
+            ImGui.SliderInt(
+                "Dye row##ADRIControlledRow",
+                ref selectedPreviewRow,
+                0,
+                31);
+        }
+
+        ImGui.TextDisabled(
+            "Selected: " +
+            PreviewRowName(selectedPreviewRow));
+
+        ImGui.TextDisabled(
+            "One click performs three trials.");
+
         if (controlledRunning)
         {
             if (ImGui.SmallButton(
@@ -698,6 +877,56 @@ public sealed partial class Plugin
                 $"Exceeds local noise: " +
                 $"{result.NoiseAdjustedPercent:F1}% of sampled region");
 
+            ImGui.TextDisabled(
+                $"{controlledTrials} completed trials; " +
+                "percentages are averaged.");
+
+            ImGui.TextUnformatted(
+                $"Outer-region median: " +
+                $"{controlledOuterMedian:F2}%");
+
+            ImGui.TextDisabled(
+                $"Outer range: {controlledOuterMin:F2}% " +
+                $"to {controlledOuterMax:F2}%");
+
+            ImGui.Spacing();
+            ImGui.Separator();
+
+            ImGui.TextUnformatted(
+                $"Character core (estimated " +
+                $"{controlledCoreWidth}x{controlledCoreHeight})");
+
+            ImGui.TextUnformatted(
+                $"Core average: {controlledCoreMean:F2}%");
+
+            ImGui.TextUnformatted(
+                $"Core median: {controlledCoreMedian:F2}%");
+
+            ImGui.TextDisabled(
+                $"Core range: {controlledCoreMin:F2}% " +
+                $"to {controlledCoreMax:F2}%");
+
+            ImGui.TextDisabled(
+                $"Core baseline / restored: " +
+                $"{controlledCoreBaseline:F1} / " +
+                $"{controlledCoreRestored:F1} RGB");
+
+            if (controlledOuterMax -
+                controlledOuterMin > 2.0)
+            {
+                ImGui.TextDisabled(
+                    "Large trial-to-trial variation: " +
+                    "treat the result as inconclusive.");
+            }
+
+            if (result.RestoredMean >
+                result.BaselineMean * 1.7 + 4.0)
+            {
+                ImGui.TextDisabled(
+                    "Scene differs substantially after " +
+                    "restoration; comparison may be unreliable.");
+            }
+
             if (result.BaselineStrongPercent > 12)
             {
                 ImGui.TextDisabled(
@@ -740,6 +969,31 @@ public sealed partial class Plugin
                     $"{result.PreviewStrongPercent:F3}%; " +
                     $"exceeds local noise: " +
                     $"{result.NoiseAdjustedPercent:F3}%");
+
+                sb.AppendLine(
+                    $"Trials: {controlledTrials}");
+
+                sb.AppendLine(
+                    $"Outer median/min/max: " +
+                    $"{controlledOuterMedian:F3}% / " +
+                    $"{controlledOuterMin:F3}% / " +
+                    $"{controlledOuterMax:F3}%");
+
+                sb.AppendLine(
+                    $"Core dimensions: " +
+                    $"{controlledCoreWidth}x{controlledCoreHeight}");
+
+                sb.AppendLine(
+                    $"Core average/median/min/max: " +
+                    $"{controlledCoreMean:F3}% / " +
+                    $"{controlledCoreMedian:F3}% / " +
+                    $"{controlledCoreMin:F3}% / " +
+                    $"{controlledCoreMax:F3}%");
+
+                sb.AppendLine(
+                    $"Core baseline/restored: " +
+                    $"{controlledCoreBaseline:F3} / " +
+                    $"{controlledCoreRestored:F3}");
             }
         }
 

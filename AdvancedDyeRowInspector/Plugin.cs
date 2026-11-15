@@ -868,8 +868,8 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector - DEV7 STAGE 2");
-        sb.AppendLine("Version: 0.0.3.14");
+        sb.AppendLine("Advanced Dye Row Inspector - DEV7 STAGE 3");
+        sb.AppendLine("Version: 0.0.3.15");
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
         sb.AppendLine("Object index: " + actorIndex);
