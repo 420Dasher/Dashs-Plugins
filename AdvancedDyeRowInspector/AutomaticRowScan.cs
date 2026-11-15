@@ -27,6 +27,9 @@ public sealed partial class Plugin
         double CoreMax,
         double BaselineMean,
         double RestoredMean,
+        double ControlMedian,
+        double NetSignal,
+        int Retries,
         string Assessment);
 
     private readonly object autoRowScanGate = new();
@@ -107,29 +110,35 @@ public sealed partial class Plugin
         double coreMax,
         double baselineMean,
         double restoredMean,
-        double baselineStrong)
+        double baselineStrong,
+        double controlMedian,
+        int retries,
+        int unstableTrials)
     {
         double spread = coreMax - coreMin;
-
-        double restorationDrift =
+        double drift =
             Math.Abs(restoredMean - baselineMean);
 
+        double netSignal =
+            Math.Max(0.0, coreMedian - controlMedian);
+
         bool unstable =
-            spread > 2.0 ||
-            restorationDrift >
-                Math.Max(4.0, baselineMean * 0.4) ||
+            unstableTrials > 0 ||
+            spread > 2.5 ||
+            controlMedian > 3.0 ||
+            drift > Math.Max(4.0, baselineMean * 0.4) ||
             baselineStrong > 12.0;
 
         if (unstable)
-            return "Uncertain - scene variation";
+            return "Inconclusive - control or scene noise";
 
-        if (coreMedian >= 4.0 && coreMin >= 3.0)
-            return "Higher relative change signal";
+        if (netSignal >= 3.0 && coreMin >= 3.0)
+            return "Strong comparative signal (experimental)";
 
-        if (coreMedian <= 2.0 && coreMax <= 3.0)
-            return "Low signal - not proof of unused";
+        if (netSignal >= 1.5)
+            return "Possible visible effect";
 
-        return "Intermediate / uncertain";
+        return "Low relative signal - not proof of unused";
     }
 
     private void BeginAutoRowScan(
@@ -302,6 +311,10 @@ public sealed partial class Plugin
                 double coreMin;
                 double coreMax;
 
+                double controlMedian;
+                int retries;
+                int unstableTrials;
+
                 lock (controlledGate)
                 {
                     if (controlledResult is not { } result ||
@@ -323,6 +336,10 @@ public sealed partial class Plugin
                     coreMedian = controlledCoreMedian;
                     coreMin = controlledCoreMin;
                     coreMax = controlledCoreMax;
+
+                    controlMedian = controlledCoreControlMedian;
+                    retries = controlledRejectedTrials;
+                    unstableTrials = controlledUnstableTrials;
                 }
 
                 string assessment = AssessAutoRowSignal(
@@ -331,7 +348,10 @@ public sealed partial class Plugin
                     coreMax,
                     summary.BaselineMean,
                     summary.RestoredMean,
-                    summary.BaselineStrongPercent);
+                    summary.BaselineStrongPercent,
+                    controlMedian,
+                    retries,
+                    unstableTrials);
 
                 var measured = new AutoRowResult(
                     candidate.Row,
@@ -344,6 +364,9 @@ public sealed partial class Plugin
                     coreMax,
                     summary.BaselineMean,
                     summary.RestoredMean,
+                    controlMedian,
+                    Math.Max(0.0, coreMedian - controlMedian),
+                    retries,
                     assessment);
 
                 lock (autoRowScanGate)
@@ -533,19 +556,22 @@ public sealed partial class Plugin
             }
 
             ImGui.TextDisabled(
-                "Ranked by character-core median, " +
-                "not UV percentage.");
+                "Ranked by core signal above no-change control.");
 
             int rank = 0;
 
             foreach (var result in results
-                .OrderByDescending(r => r.CoreMedian))
+                .OrderByDescending(r => r.NetSignal))
             {
                 rank++;
 
                 ImGui.TextUnformatted(
                     $"#{rank}  {result.Row}  |  " +
-                    $"Core: {result.CoreMedian:F2}%");
+                    $"Above control: {result.NetSignal:F2}%");
+
+                ImGui.TextDisabled(
+                    $"Core: {result.CoreMedian:F2}%  |  " +
+                    $"Control: {result.ControlMedian:F2}%");
 
                 ImGui.TextDisabled(
                     $"UV: {result.UvPercent:F1}%  |  " +
@@ -558,6 +584,13 @@ public sealed partial class Plugin
                     $"{result.OuterMax:F2}%");
 
                 ImGui.TextWrapped(result.Assessment);
+
+                if (result.Retries > 0)
+                {
+                    ImGui.TextDisabled(
+                        $"Retried {result.Retries} noisy trial(s).");
+                }
+
                 ImGui.Spacing();
             }
         }
@@ -579,7 +612,7 @@ public sealed partial class Plugin
         StringBuilder sb)
     {
         sb.AppendLine(
-            "[DEV7 STAGE 4 AUTOMATIC CANDIDATE SCAN]");
+            "[DEV7 STAGE 5 AUTOMATIC CANDIDATE SCAN]");
 
         lock (autoRowScanGate)
         {
@@ -602,6 +635,9 @@ public sealed partial class Plugin
                     $"[{row.OuterMin:F3}, {row.OuterMax:F3}]; " +
                     $"baseline {row.BaselineMean:F3}; " +
                     $"restored {row.RestoredMean:F3}; " +
+                    $"control {row.ControlMedian:F3}%; " +
+                    $"net {row.NetSignal:F3}%; " +
+                    $"retries {row.Retries}; " +
                     row.Assessment);
             }
         }

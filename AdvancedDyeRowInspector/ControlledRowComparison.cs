@@ -73,6 +73,11 @@ public sealed partial class Plugin
     private double controlledCoreMax;
     private double controlledCoreBaseline;
     private double controlledCoreRestored;
+
+    private double controlledCoreControlMedian;
+    private double controlledOuterControlMedian;
+    private int controlledRejectedTrials;
+    private int controlledUnstableTrials;
     private int controlledCoreWidth;
     private int controlledCoreHeight;
 
@@ -426,6 +431,10 @@ public sealed partial class Plugin
             controlledCoreMax = 0;
             controlledCoreBaseline = 0;
             controlledCoreRestored = 0;
+            controlledCoreControlMedian = 0;
+            controlledOuterControlMedian = 0;
+            controlledRejectedTrials = 0;
+            controlledUnstableTrials = 0;
             controlledCoreWidth = 0;
             controlledCoreHeight = 0;
 
@@ -467,6 +476,12 @@ public sealed partial class Plugin
         var outerResults = new List<ControlledRowResult>(3);
         var coreResults = new List<ControlledRowResult>(3);
 
+        var outerControls = new List<ControlledRowResult>(3);
+        var coreControls = new List<ControlledRowResult>(3);
+
+        int retriedTrials = 0;
+        int unstableAccepted = 0;
+
         string rowName = PreviewRowName(borrow.Target.Row);
 
         try
@@ -505,6 +520,54 @@ public sealed partial class Plugin
 
                 var beforeB = await CaptureScreenFrameAsync(
                     viewport, token).ConfigureAwait(false);
+
+                // Additional NO-CHANGE capture.
+                // The outfit remains completely untouched.
+                await Task.Delay(
+                    250, token).ConfigureAwait(false);
+
+                var noChange = await CaptureScreenFrameAsync(
+                    viewport, token).ConfigureAwait(false);
+
+                var controlOuter = CompareControlledFrames(
+                    beforeA,
+                    beforeB,
+                    noChange,
+                    noChange,
+                    region,
+                    rowName);
+
+                var controlCore = CompareControlledFrames(
+                    beforeA,
+                    beforeB,
+                    noChange,
+                    noChange,
+                    coreRegion,
+                    rowName);
+
+                bool noisyControl =
+                    controlCore.NoiseAdjustedPercent > 3.5 ||
+                    controlCore.BaselineStrongPercent > 12.0;
+
+                // Reject the measurement BEFORE writing
+                // any temporary GPU texture.
+                if (noisyControl && retriedTrials < 2)
+                {
+                    retriedTrials++;
+
+                    SetControlledStatus(
+                        $"Noisy control; retry {retriedTrials}/2...");
+
+                    trial--;
+
+                    await Task.Delay(
+                        250, token).ConfigureAwait(false);
+
+                    continue;
+                }
+
+                if (noisyControl)
+                    unstableAccepted++;
 
                 SetControlledStatus(
                     $"Trial {trial + 1}/3: reading GPU colorset...");
@@ -605,20 +668,53 @@ public sealed partial class Plugin
                     viewport, token).ConfigureAwait(false);
 
                 var outer = CompareControlledFrames(
-                    beforeA,
                     beforeB,
+                    noChange,
                     highlighted,
                     after,
                     region,
                     rowName);
 
                 var core = CompareControlledFrames(
-                    beforeA,
                     beforeB,
+                    noChange,
                     highlighted,
                     after,
                     coreRegion,
                     rowName);
+
+                // Compare post-restore drift to the
+                // same trial's natural noise level.
+                double restorationDrift = Math.Abs(
+                    core.RestoredMean - core.BaselineMean);
+
+                bool unstableRestoration =
+                    restorationDrift >
+                    Math.Max(4.0, core.BaselineMean * 0.5);
+
+                // The native texture has ALREADY been
+                // restored before reaching this check.
+                if (unstableRestoration && retriedTrials < 2)
+                {
+                    retriedTrials++;
+
+                    SetControlledStatus(
+                        $"Unstable restoration; retry " +
+                        $"{retriedTrials}/2...");
+
+                    trial--;
+
+                    await Task.Delay(
+                        250, token).ConfigureAwait(false);
+
+                    continue;
+                }
+
+                if (unstableRestoration)
+                    unstableAccepted++;
+
+                outerControls.Add(controlOuter);
+                coreControls.Add(controlCore);
 
                 outerResults.Add(outer);
                 coreResults.Add(core);
@@ -639,6 +735,16 @@ public sealed partial class Plugin
                 .ToArray();
 
             var coreScores = coreResults
+                .Select(r => r.NoiseAdjustedPercent)
+                .OrderBy(v => v)
+                .ToArray();
+
+            var outerControlScores = outerControls
+                .Select(r => r.NoiseAdjustedPercent)
+                .OrderBy(v => v)
+                .ToArray();
+
+            var coreControlScores = coreControls
                 .Select(r => r.NoiseAdjustedPercent)
                 .OrderBy(v => v)
                 .ToArray();
@@ -677,6 +783,15 @@ public sealed partial class Plugin
                     controlledCoreMin = coreScores[0];
                     controlledCoreMedian = coreScores[1];
                     controlledCoreMax = coreScores[2];
+
+                    controlledOuterControlMedian =
+                        outerControlScores[1];
+
+                    controlledCoreControlMedian =
+                        coreControlScores[1];
+
+                    controlledRejectedTrials = retriedTrials;
+                    controlledUnstableTrials = unstableAccepted;
 
                     controlledCoreBaseline = coreResults.Average(
                         r => r.BaselineMean);
@@ -914,6 +1029,19 @@ public sealed partial class Plugin
             ImGui.TextUnformatted(
                 $"Core median: {controlledCoreMedian:F2}%");
 
+            ImGui.TextUnformatted(
+                $"No-change control: " +
+                $"{controlledCoreControlMedian:F2}%");
+
+            ImGui.TextUnformatted(
+                $"Above control: " +
+                $"{Math.Max(0.0, controlledCoreMedian -
+                    controlledCoreControlMedian):F2}%");
+
+            ImGui.TextDisabled(
+                $"Retries: {controlledRejectedTrials}  |  " +
+                $"Unstable accepted: {controlledUnstableTrials}");
+
             ImGui.TextDisabled(
                 $"Core range: {controlledCoreMin:F2}% " +
                 $"to {controlledCoreMax:F2}%");
@@ -1006,6 +1134,15 @@ public sealed partial class Plugin
                     $"Core baseline/restored: " +
                     $"{controlledCoreBaseline:F3} / " +
                     $"{controlledCoreRestored:F3}");
+
+                sb.AppendLine(
+                    $"No-change control median, core/outer: " +
+                    $"{controlledCoreControlMedian:F3}% / " +
+                    $"{controlledOuterControlMedian:F3}%");
+
+                sb.AppendLine(
+                    $"Rejected trials: {controlledRejectedTrials}; " +
+                    $"unstable accepted: {controlledUnstableTrials}");
             }
         }
 
