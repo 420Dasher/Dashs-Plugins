@@ -123,6 +123,49 @@ public sealed unsafe partial class Plugin
 
         return false;
     }
+    // DEV11: A main Aetheryte can use a free local route
+    // only when a real, unlocked subnet shard belonging
+    // to that exact city network is safely within range.
+    private bool MapRouteNearSameCitySubnet(Shard mainTarget)
+    {
+        var player = Objects.LocalPlayer;
+
+        if (!mainTarget.IsMain ||
+            player == null ||
+            nearby == null ||
+            !nearby.IsTargetable ||
+            !IsShardObject(nearby) ||
+            Client.TerritoryType != mainTarget.Territory ||
+            activeTerritory != mainTarget.Territory ||
+            activeGroup != mainTarget.Group ||
+            !networks.TryGetValue(mainTarget.Group, out var members))
+            return false;
+
+        float distance = Vector3.Distance(
+            player.Position,
+            nearby.Position);
+
+        if (distance > MapRouteSafeInteractionRange())
+            return false;
+
+        string objectName = nearby.Name.ToString();
+
+        // The source must be a known, unlocked, non-main
+        // subnet shard in the exact destination network.
+        return members.Any(shard =>
+            !shard.IsMain &&
+            !shard.Invisible &&
+            shard.Territory == mainTarget.Territory &&
+            IsUnlocked(shard.Id) &&
+            (
+                shard.Id == nearby.BaseId ||
+                string.Equals(
+                    shard.Name,
+                    objectName,
+                    StringComparison.OrdinalIgnoreCase)
+            )
+        );
+    }
     private bool MapRouteNearSource(Shard target)
     {
         var player = Objects.LocalPlayer;
@@ -241,6 +284,17 @@ public sealed unsafe partial class Plugin
         {
             reason = "Already at " + target.Name + ".";
             return false;
+        }
+
+        // Prefer free Aethernet to the city main crystal,
+        // but only when its own subnet shard is nearby.
+        // Otherwise retain the existing paid teleport route.
+        if (target.IsMain &&
+            !mapRouteExplicitPaid &&
+            MapRouteNearSameCitySubnet(target))
+        {
+            direct = true;
+            return true;
         }
 
         if (!target.IsMain && !mapRouteExplicitPaid)
