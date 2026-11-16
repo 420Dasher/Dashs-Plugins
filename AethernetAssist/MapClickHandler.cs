@@ -742,6 +742,13 @@ public sealed unsafe partial class Plugin
         mapClickPreview =
             $"Residential Aethernet: {stop.Name} (ID {stop.Id})";
 
+        // Map-originated residential travel must leave the
+        // navigation window visible throughout the operation.
+        currentPage = NavigationPage.Aethernet;
+        RememberNavigationPage(NavigationPage.Aethernet);
+        autoWindowOwnsVisibility = false;
+        windowOpen = true;
+
         StartResidentialTravel(stop, keepWindowOpen: true);
 
         AppendMapClickRecord(

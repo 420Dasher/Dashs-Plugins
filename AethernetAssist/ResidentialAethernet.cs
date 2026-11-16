@@ -45,6 +45,15 @@ public sealed unsafe partial class Plugin
     private bool residentialSawLoading;
     private int residentialCallbackAttempts;
 
+    // Match the proven city Aethernet readiness protection.
+    private DateTime residentialNativeReadySince = DateTime.MinValue;
+    private int residentialNativeReadyRow = -1;
+    private uint residentialNativeReadyCallback;
+    private uint residentialNativeReadyState;
+    private string residentialFirstCallbackSnapshot = "";
+    private DateTime residentialFirstCallbackAt = DateTime.MinValue;
+    private DateTime residentialSecondCallbackAt = DateTime.MinValue;
+
     private string residentialStatus =
         "Approach a residential Aethernet shard.";
 
@@ -184,6 +193,13 @@ public sealed unsafe partial class Plugin
         residentialSawLoading = false;
         residentialCallbackAttempts = 0;
         residentialLastAction = DateTime.MinValue;
+        residentialNativeReadySince = DateTime.MinValue;
+        residentialNativeReadyRow = -1;
+        residentialNativeReadyCallback = 0;
+        residentialNativeReadyState = uint.MaxValue;
+        residentialFirstCallbackSnapshot = "";
+        residentialFirstCallbackAt = DateTime.MinValue;
+        residentialSecondCallbackAt = DateTime.MinValue;
 
         residentialMenuReadout =
             "Requested " + stop.Name + ", sheet row " + stop.Id;
@@ -488,6 +504,41 @@ public sealed unsafe partial class Plugin
             return;
         }
 
+        // Require the same validated native destination entry
+        // to remain stable for at least 300 ms before sending.
+        // This mirrors the proven city Aethernet controller.
+        if (residentialNativeReadySince == DateTime.MinValue ||
+            residentialNativeReadyRow != foundRow ||
+            residentialNativeReadyCallback != callback.UInt ||
+            residentialNativeReadyState != state.UInt)
+        {
+            residentialNativeReadySince = now;
+            residentialNativeReadyRow = foundRow;
+            residentialNativeReadyCallback = callback.UInt;
+            residentialNativeReadyState = state.UInt;
+
+            residentialMenuReadout +=
+                " | Native readiness stabilizing.";
+
+            return;
+        }
+
+        double readyMilliseconds =
+            (now - residentialNativeReadySince).TotalMilliseconds;
+
+        if (readyMilliseconds < 300)
+        {
+            residentialMenuReadout +=
+                " | Native readiness=" +
+                readyMilliseconds.ToString("F0") + "/300ms";
+
+            return;
+        }
+
+        string callbackSnapshot =
+            $"Row={foundRow}|Type={type.UInt}|State={state.UInt}|" +
+            $"Callback={callback.UInt}|Name={Clean(residentialTarget.Name)}";
+
         // No blind or unlimited callbacks.
         if (residentialCallbackAttempts >= 2)
         {
@@ -510,6 +561,40 @@ public sealed unsafe partial class Plugin
         };
 
         bool dispatchResult = addon->FireCallback(2, args, true);
+
+        DateTime callbackAt = DateTime.UtcNow;
+        string timingReadout;
+
+        if (residentialCallbackAttempts == 0)
+        {
+            residentialFirstCallbackAt = callbackAt;
+            residentialFirstCallbackSnapshot = callbackSnapshot;
+
+            timingReadout =
+                " | FirstCallbackUTC=" +
+                callbackAt.ToString("HH:mm:ss.fff");
+        }
+        else
+        {
+            residentialSecondCallbackAt = callbackAt;
+
+            double callbackGap =
+                (residentialSecondCallbackAt -
+                 residentialFirstCallbackAt).TotalMilliseconds;
+
+            bool snapshotUnchanged =
+                string.Equals(
+                    residentialFirstCallbackSnapshot,
+                    callbackSnapshot,
+                    StringComparison.Ordinal);
+
+            timingReadout =
+                " | SecondCallbackUTC=" +
+                callbackAt.ToString("HH:mm:ss.fff") +
+                " | CallbackGap=" +
+                callbackGap.ToString("F0") + "ms" +
+                " | SnapshotUnchanged=" + snapshotUnchanged;
+        }
 
         residentialCallbackAttempts++;
 
