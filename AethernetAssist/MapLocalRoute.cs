@@ -13,6 +13,10 @@ public sealed unsafe partial class Plugin
     private bool mapRouteWalkingToTarget;
     private bool mapRouteQuoteReady;
 
+    // DEV11: City routes may cross between the two
+    // districts while retaining the same AethernetGroup.
+    private const float MapRouteLocalShardDiscoveryRange = 50f;
+
     private nint mapRouteLocalSourceAddress;
     private uint mapRouteLocalSourceTerritory;
     private Vector3 mapRouteLocalSourcePosition;
@@ -22,8 +26,7 @@ public sealed unsafe partial class Plugin
     // already used by the native Aethernet navigation UI.
     private bool MapRouteInLocalNetwork(Shard target)
     {
-        return !target.IsMain &&
-               territories.TryGetValue(
+        return territories.TryGetValue(
                    Client.TerritoryType, out var groups) &&
                groups.Contains(target.Group);
     }
@@ -79,7 +82,7 @@ public sealed unsafe partial class Plugin
 
             // Only follow a real object currently loaded
             // in the player's local game world.
-            if (distance > 130f || distance >= nearestDistance)
+            if (distance > MapRouteLocalShardDiscoveryRange || distance >= nearestDistance)
                 continue;
 
             nearest = obj;
@@ -113,6 +116,73 @@ public sealed unsafe partial class Plugin
                 obj.Position,
                 mapRouteLocalSourcePosition) < 3f
         );
+    }
+
+    // Called after all suitable local shard paths have
+    // been rejected. Paid routing remains subject to the
+    // existing user confirmation and AutoPaidMapRouting settings.
+    private void MapRouteFallbackToPaid(
+        Shard target,
+        Shard main,
+        string failureReason)
+    {
+        StopMapRouteWalk();
+        ResetMapRoutePathRecovery();
+
+        mapRouteSettling = false;
+        mapRoutePhase = MapRoutePhase.Idle;
+        mapRouteWalkingLocal = false;
+        mapRouteWalkingToTarget = false;
+        mapRouteLocalSourceAddress = 0;
+        mapRouteDirectStopRange = 0f;
+        mapRouteExplicitPaid = true;
+        mapRouteAutoPending = false;
+
+        mapRouteQuoteReady = MapRouteTryQuote(
+            target,
+            main,
+            out mapRoutePreviewDirect,
+            out mapRoutePreviewWalk,
+            out mapRouteQuotedCost,
+            out string reason);
+
+        if (!mapRouteQuoteReady)
+        {
+            mapRouteStatus =
+                "No valid free route (" + failureReason +
+                "). Paid fallback unavailable: " + reason;
+
+            mapRouteWindowOpen = true;
+            return;
+        }
+
+        mapRouteStatus =
+            "No valid free same-city route. " +
+            "Paid teleport is available for review.";
+
+        bool needsConfirmation =
+            config.ConfirmMapRoutes ||
+            !config.AutoPaidMapRouting;
+
+        if (needsConfirmation)
+        {
+            mapRouteWindowOpen = true;
+        }
+        else
+        {
+            mapRouteWindowOpen = false;
+            mapRouteAutoPending = true;
+
+            mapRouteStatus =
+                "Free route unavailable. Starting the " +
+                "previously opted-in paid teleport.";
+        }
+
+        Log.Warning(
+            "DEV11: same-city free route exhausted. " +
+            "Paid fallback prepared. " +
+            "Reason=" + failureReason +
+            "; gil=" + mapRouteQuotedCost);
     }
 
     private void MapRouteSelectPaidAlternative(bool paid)

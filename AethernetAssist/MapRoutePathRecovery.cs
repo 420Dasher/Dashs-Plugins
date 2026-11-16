@@ -370,6 +370,17 @@ public sealed unsafe partial class Plugin
             }
         }
 
+        if (mapRouteWalkingLocal &&
+            mapRouteTarget is { } localTarget &&
+            localTarget.IsMain)
+        {
+            MapRouteFallbackToPaid(
+                localTarget,
+                main,
+                failureReason);
+            return;
+        }
+
         StopMapRoute(
             "No navigable walking path to a usable Aetheryte. " +
             "No interaction or paid teleport attempted."

@@ -31,6 +31,9 @@ public sealed unsafe partial class Plugin
     private DateTime mapRouteStarted;
     private string mapRouteStatus = "";
 
+    // DEV11: A local same-city walk must stay compact.
+    private const float MapRouteMaximumLocalPathLength = 70f;
+
     private Task<List<Vector3>>? mapRouteWalkPathTask;
     private bool mapRouteWalkAttempted;
     private bool mapRouteWalkOwnsPath;
@@ -123,9 +126,8 @@ public sealed unsafe partial class Plugin
 
         return false;
     }
-    // DEV11: A main Aetheryte can use a free local route
-    // only when a real, unlocked subnet shard belonging
-    // to that exact city network is safely within range.
+    // DEV11: A main Aetheryte may use a free source in
+    // either district, provided the AethernetGroup matches.
     private bool MapRouteNearSameCitySubnet(Shard mainTarget)
     {
         var player = Objects.LocalPlayer;
@@ -135,27 +137,23 @@ public sealed unsafe partial class Plugin
             nearby == null ||
             !nearby.IsTargetable ||
             !IsShardObject(nearby) ||
-            Client.TerritoryType != mainTarget.Territory ||
-            activeTerritory != mainTarget.Territory ||
+            activeTerritory != Client.TerritoryType ||
             activeGroup != mainTarget.Group ||
             !networks.TryGetValue(mainTarget.Group, out var members))
             return false;
 
         float distance = Vector3.Distance(
-            player.Position,
-            nearby.Position);
+            player.Position, nearby.Position);
 
         if (distance > MapRouteSafeInteractionRange())
             return false;
 
         string objectName = nearby.Name.ToString();
 
-        // The source must be a known, unlocked, non-main
-        // subnet shard in the exact destination network.
         return members.Any(shard =>
             !shard.IsMain &&
             !shard.Invisible &&
-            shard.Territory == mainTarget.Territory &&
+            shard.Territory == Client.TerritoryType &&
             IsUnlocked(shard.Id) &&
             (
                 shard.Id == nearby.BaseId ||
@@ -286,15 +284,24 @@ public sealed unsafe partial class Plugin
             return false;
         }
 
-        // Prefer free Aethernet to the city main crystal,
-        // but only when its own subnet shard is nearby.
-        // Otherwise retain the existing paid teleport route.
-        if (target.IsMain &&
-            !mapRouteExplicitPaid &&
-            MapRouteNearSameCitySubnet(target))
+        // Main city Aetherytes can be reached freely from
+        // either district through a shard in the same network.
+        if (target.IsMain && !mapRouteExplicitPaid)
         {
-            direct = true;
-            return true;
+            if (MapRouteNearSameCitySubnet(target))
+            {
+                direct = true;
+                return true;
+            }
+
+            if (MapRouteFindLocalSource(target) != null)
+            {
+                walkLocal = true;
+                return true;
+            }
+
+            // No eligible source within 50y: continue into
+            // the existing paid-teleport quote below.
         }
 
         if (!target.IsMain && !mapRouteExplicitPaid)
@@ -925,11 +932,31 @@ public sealed unsafe partial class Plugin
             var selectedCrystal =
                 MapRouteGetActiveWalkCrystal(main);
 
+            float calculatedPathLength = 0f;
+
+            if (points != null && points.Count > 0)
+            {
+                Vector3 previous = player.Position;
+
+                foreach (var point in points)
+                {
+                    calculatedPathLength +=
+                        Vector3.Distance(previous, point);
+
+                    previous = point;
+                }
+            }
+
+            bool pathWithinWalkingLimit =
+                !mapRouteWalkingLocal ||
+                calculatedPathLength <= MapRouteMaximumLocalPathLength;
+
             bool validEndpoint =
                 selectedCrystal != null &&
                 points != null &&
                 points.Count > 0 &&
                 points.Count <= 256 &&
+                pathWithinWalkingLimit &&
                 Vector3.Distance(
                     points[points.Count - 1],
                     selectedCrystal.Position
@@ -940,6 +967,8 @@ public sealed unsafe partial class Plugin
                 string detail = points == null
                     ? "NULL path"
                     : "Waypoints=" + points.Count +
+                      "; calculated length=" +
+                      calculatedPathLength.ToString("0.0") + "y" +
                       (points.Count > 0 && selectedCrystal != null
                         ? "; endpoint distance=" +
                           Vector3.Distance(
@@ -949,18 +978,27 @@ public sealed unsafe partial class Plugin
                         : "");
 
                 Log.Warning(
-                    "DEV9 FIX2: invalid path result: " +
-                    detail
+                    "DEV11: invalid local route: " + detail
                 );
 
                 RecoverMapRoutePath(
                     main,
-                    "No valid path endpoint within " +
-                    MapRouteSafeInteractionRange().ToString("0.0") +
-                    "y of the selected crystal."
+                    !pathWithinWalkingLimit
+                        ? "Calculated local path exceeds " +
+                          MapRouteMaximumLocalPathLength + "y."
+                        : "No valid path endpoint within " +
+                          MapRouteSafeInteractionRange().ToString("0.0") +
+                          "y of the selected crystal."
                 );
                 return;
             }
+
+            Log.Information(
+                "DEV11: validated walking route; " +
+                "source=" + (selectedCrystal?.BaseId ?? 0) +
+                "; path=" + calculatedPathLength.ToString("0.0") +
+                "y; limit=" + MapRouteMaximumLocalPathLength + "y."
+            );
 
             try
             {
