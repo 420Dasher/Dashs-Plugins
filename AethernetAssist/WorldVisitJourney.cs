@@ -141,7 +141,7 @@ public sealed unsafe partial class Plugin
         worldVisitUiSelectedWorldId = 0;
 
         worldVisitCachedDestinations.Clear();
-        worldVisitCachedAddon = nint.Zero;
+
         worldVisitPrelistUpdated = DateTime.MinValue;
 
         if (arrived)
@@ -880,30 +880,79 @@ public sealed unsafe partial class Plugin
                 : Clean(
                     yesno->PromptText->NodeText.ToString());
 
-            worldVisitJourneyDetails +=
-                " | Confirmation=" + prompt;
-
             string expected =
                 "Travel to " + target.Name + "?";
 
+            // Fail closed if the destination-specific
+            // native confirmation differs in any way.
             if (!string.Equals(
-                prompt, expected,
+                prompt,
+                expected,
                 StringComparison.OrdinalIgnoreCase))
             {
                 StopWorldVisit(
-                    "Native confirmation mismatch. " +
-                    "No travel confirmation sent.");
+                    "World Visit confirmation mismatch. " +
+                    "No automatic confirmation sent.");
                 return;
             }
 
-            // DEV6: Player must confirm or decline.
-            // Never submit the native Yes callback.
+            // Native world selection must have been
+            // submitted and the original source world
+            // must still match this journey.
+            if (!worldVisitPending ||
+                worldVisitConfirmationSent ||
+                worldVisitSawQueue ||
+                busy ||
+                player == null ||
+                player.CurrentWorld.RowId !=
+                    worldVisitOriginWorld ||
+                Client.TerritoryType !=
+                    worldVisitOriginTerritory)
+            {
+                StopWorldVisit(
+                    "World Visit confirmation safety " +
+                    "checks failed. No confirmation sent.");
+                return;
+            }
+
+            if (yesno->YesButton == null ||
+                !yesno->YesButton->IsEnabled)
+            {
+                // Retain the established manual fallback.
+                SetWorldVisitPhase(
+                    WorldVisitPhase.ManualConfirmation);
+
+                worldVisitJourneyStatus =
+                    "Native Yes button unavailable. " +
+                    "Confirm or decline manually.";
+                return;
+            }
+
+            // Previously verified native SelectYesno
+            // callback. Zero is the Yes response.
+            AtkValue answer = new()
+            {
+                Type = AtkValueType.Int,
+                Int = 0
+            };
+
+            yesno->AtkUnitBase.FireCallback(
+                1, &answer, true);
+
+            worldVisitConfirmationSent = true;
+            worldVisitManualDecision =
+                WorldVisitManualDecision.Accepted;
+
+            worldVisitJourneyDetails +=
+                " | Auto-confirmed=" + prompt;
+
             SetWorldVisitPhase(
-                WorldVisitPhase.ManualConfirmation);
+                WorldVisitPhase.WaitForArrival);
 
             worldVisitJourneyStatus =
-                "Verified: " + prompt +
-                " Confirm or decline manually.";
+                "World Visit requested: " +
+                target.Name + ". Waiting for FFXIV.";
+
             return;
         }
     }

@@ -5,7 +5,7 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
-using Dalamud.Memory;
+
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using Lumina.Excel.Sheets;
@@ -21,212 +21,74 @@ public sealed unsafe partial class Plugin
         bool Current
     );
 
-    private readonly List<string> worldVisitNativeInputTrace = new();
-
-    private void InitializeWorldVisitNativeResearch()
+    // Listen only for player-controlled fallback
+    // confirmations. Automatic selection uses the
+    // separate, validated journey state machine.
+    private void InitializeWorldVisitConfirmationObserver()
     {
         AddonLifecycle.RegisterListener(
             AddonEvent.PreReceiveEvent,
-            new[] { "WorldTravelSelect", "SelectString", "SelectYesno" },
-            OnWorldVisitNativeInput
-        );
-
-        AddonLifecycle.RegisterListener(
-            AddonEvent.PostReceiveEvent,
-            new[] { "WorldTravelSelect", "SelectString", "SelectYesno" },
-            OnWorldVisitNativeInput
-        );
+            "SelectYesno",
+            OnWorldVisitConfirmationInput);
     }
 
-    private void DisposeWorldVisitNativeResearch()
+    private void DisposeWorldVisitConfirmationObserver()
     {
         AddonLifecycle.UnregisterListener(
-            OnWorldVisitNativeInput
-        );
+            OnWorldVisitConfirmationInput);
     }
 
-    private void OnWorldVisitNativeInput(
+    private void OnWorldVisitConfirmationInput(
         AddonEvent stage,
         AddonArgs args)
     {
-        if (args is not AddonReceiveEventArgs evt)
+        if (stage != AddonEvent.PreReceiveEvent ||
+            args is not AddonReceiveEventArgs evt ||
+            worldVisitPhase != WorldVisitPhase.ManualConfirmation ||
+            evt.AtkEvent == nint.Zero ||
+            evt.AtkEventType.ToString() != "ButtonClick")
             return;
 
         try
         {
-            // Observe the real native Yes/No button.
-            // Do not intercept or modify the event.
-            if (args.AddonName == "SelectYesno")
-            {
-                if (stage == AddonEvent.PreReceiveEvent &&
-                    worldVisitPhase ==
-                        WorldVisitPhase.ManualConfirmation &&
-                    evt.AtkEvent != nint.Zero &&
-                    evt.AtkEventType.ToString() == "ButtonClick")
-                {
-                    var yesno =
-                        (AddonSelectYesno*)GetAddon("SelectYesno");
+            var yesno =
+                (AddonSelectYesno*)GetAddon("SelectYesno");
 
-                    if (yesno != null &&
-                        yesno->PromptText != null &&
-                        worldVisitTarget != null &&
-                        string.Equals(
-                            Clean(
-                                yesno->PromptText->NodeText.ToString()),
-                            "Travel to " +
-                                worldVisitTarget.Name + "?",
-                            StringComparison.OrdinalIgnoreCase))
-                    {
-                        var nativeEvent =
-                            (AtkEvent*)evt.AtkEvent;
-
-                        if (yesno->NoButton != null &&
-                            (nint)nativeEvent->Target ==
-                            (nint)yesno->NoButton->OwnerNode)
-                        {
-                            worldVisitManualDecision =
-                                WorldVisitManualDecision.Declined;
-                        }
-                        else if (yesno->YesButton != null &&
-                            (nint)nativeEvent->Target ==
-                            (nint)yesno->YesButton->OwnerNode)
-                        {
-                            worldVisitManualDecision =
-                                WorldVisitManualDecision.Accepted;
-                        }
-
-                        worldVisitNativeInputTrace.Add(
-                            DateTime.Now.ToString("HH:mm:ss.fff") +
-                            " | SelectYesno ButtonClick" +
-                            " | Param=" + evt.EventParam +
-                            " | Decision=" +
-                                worldVisitManualDecision);
-
-                        if (worldVisitNativeInputTrace.Count > 64)
-                            worldVisitNativeInputTrace.RemoveAt(0);
-                    }
-                }
-
-                return;
-            }
-
-            var addon = GetAddon("WorldTravelSelect");
-
-            if (addon == null)
-                return;
-
-            string eventType = evt.AtkEventType.ToString();
-
-            // Do not fill the trace with mouse movements
-            // and hover notifications.
-            if (eventType.Contains(
-                    "MouseMove",
-                    StringComparison.OrdinalIgnoreCase) ||
-                eventType.Contains(
-                    "MouseOver",
-                    StringComparison.OrdinalIgnoreCase) ||
-                eventType.Contains(
-                    "MouseOut",
+            if (yesno == null ||
+                yesno->PromptText == null ||
+                worldVisitTarget == null ||
+                !string.Equals(
+                    Clean(
+                        yesno->PromptText->NodeText.ToString()),
+                    "Travel to " +
+                        worldVisitTarget.Name + "?",
                     StringComparison.OrdinalIgnoreCase))
                 return;
 
-            // Keep only meaningful interactions in the trace.
-            // Hovering across multiple rows otherwise fills
-            // the buffer before the user copies diagnostics.
-            if (eventType == "ListItemRollOver" ||
-                eventType == "ListItemRollOut")
-                return;
+            var nativeEvent = (AtkEvent*)evt.AtkEvent;
 
-            string selectedDc = "unavailable";
-            string selectedWorld = "unavailable";
-
-            if (addon->AtkValues != null &&
-                addon->AtkValuesCount >= 13)
+            if (yesno->NoButton != null &&
+                (nint)nativeEvent->Target ==
+                (nint)yesno->NoButton->OwnerNode)
             {
-                var dcValue = addon->AtkValues[11];
-                var worldValue = addon->AtkValues[12];
-
-                if (dcValue.Type == AtkValueType.UInt)
-                    selectedDc = dcValue.UInt.ToString();
-
-                if (worldValue.Type == AtkValueType.Int)
-                    selectedWorld = worldValue.Int.ToString();
+                worldVisitManualDecision =
+                    WorldVisitManualDecision.Declined;
             }
-
-            // The generic event parameter does not contain
-            // the clicked row. ListItemData.SelectedIndex
-            // is supplied separately by the native UI.
-            string listDetails = "";
-
-            if (stage == AddonEvent.PreReceiveEvent &&
-                eventType == "ListItemClick" &&
-                evt.AtkEventData != 0)
+            else if (yesno->YesButton != null &&
+                (nint)nativeEvent->Target ==
+                (nint)yesno->YesButton->OwnerNode)
             {
-                var data = (AtkEventData*)evt.AtkEventData;
-
-                int selectedIndex =
-                    data->ListItemData.SelectedIndex;
-
-                short hoveredIndex =
-                    data->ListItemData.HoveredItemIndex3;
-
-                listDetails =
-                    " | SelectedIndex=" + selectedIndex +
-                    " | HoveredIndex=" + hoveredIndex +
-                    " | MouseButton=" +
-                    data->ListItemData.MouseButtonId;
+                worldVisitManualDecision =
+                    WorldVisitManualDecision.Accepted;
             }
-
-            string record =
-                DateTime.Now.ToString("HH:mm:ss.fff") +
-                " | " + stage +
-                " | Addon=" + args.AddonName +
-                " | Event=" + eventType +
-                " | Param=" + evt.EventParam +
-                " | Value11=" + selectedDc +
-                " | Value12=" + selectedWorld +
-                listDetails;
-
-            worldVisitNativeInputTrace.Add(record);
-
-            if (worldVisitNativeInputTrace.Count > 64)
-                worldVisitNativeInputTrace.RemoveAt(0);
         }
         catch (Exception ex)
         {
-            // Observational only. Never interrupt the
-            // native menu or change its event processing.
             Log.Warning(
-                "World Visit native event observation failed: " +
-                ex.Message
-            );
+                "World Visit confirmation observation: " +
+                ex.Message);
         }
     }
-
-    private string BuildWorldVisitNativeInputReport()
-    {
-        var report = new System.Text.StringBuilder();
-
-        report.AppendLine();
-        report.AppendLine(
-            "=== PATCH 7.58 WORLD VISIT INPUT EVENTS ==="
-        );
-
-        report.AppendLine(
-            "Captured events: " +
-            worldVisitNativeInputTrace.Count
-        );
-
-        foreach (var record in worldVisitNativeInputTrace)
-            report.AppendLine(record);
-
-        report.AppendLine(
-            "Observation only. No events intercepted or modified."
-        );
-
-        return report.ToString();
-    }
-
     private string worldVisitSelectionStatus =
         "No native destination selected this session.";
 
@@ -235,58 +97,11 @@ public sealed unsafe partial class Plugin
 
     private bool worldVisitPending;
 
-    private DateTime worldVisitLastRefresh =
-        DateTime.MinValue;
 
-    private nint worldVisitCachedAddon;
     private string worldVisitCachedError = "";
 
     private readonly List<WorldVisitDestination>
         worldVisitCachedDestinations = new();
-
-    private static bool WorldVisitHasText(
-        AtkUldManager* manager,
-        string expected,
-        int depth = 0)
-    {
-        if (manager == null ||
-            manager->NodeList == null ||
-            depth > 4)
-            return false;
-
-        for (int i = 0; i < manager->NodeListCount; i++)
-        {
-            var node = manager->NodeList[i];
-
-            if (node == null)
-                continue;
-
-            if (node->Type == NodeType.Text)
-            {
-                string label = ((AtkTextNode*)node)
-                    ->NodeText.ToString().Trim();
-
-                if (string.Equals(
-                    label, expected,
-                    StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
-            else if ((int)node->Type > 1000)
-            {
-                var component =
-                    ((AtkComponentNode*)node)->Component;
-
-                if (component != null &&
-                    WorldVisitHasText(
-                        &component->UldManager,
-                        expected,
-                        depth + 1))
-                    return true;
-            }
-        }
-
-        return false;
-    }
 
     private bool TryReadWorldVisitDestinations(
         out List<WorldVisitDestination> destinations,
@@ -370,52 +185,7 @@ public sealed unsafe partial class Plugin
 
         return true;
     }
-    private void RefreshWorldVisitDestinations()
-    {
-        var addon = GetAddon("WorldTravelSelect");
-
-        if (addon == null)
-        {
-            worldVisitCachedDestinations.Clear();
-            worldVisitCachedAddon = nint.Zero;
-            worldVisitPending = false;
-            worldVisitCachedError =
-                "Native World Visit menu is closed.";
-            return;
-        }
-
-        var now = DateTime.UtcNow;
-
-        if (worldVisitCachedAddon == (nint)addon &&
-            (now - worldVisitLastRefresh)
-                .TotalMilliseconds < 500)
-            return;
-
-        worldVisitCachedAddon = (nint)addon;
-        worldVisitLastRefresh = now;
-
-        worldVisitCachedDestinations.Clear();
-
-        if (TryReadWorldVisitDestinations(
-            out var results, out var error))
-        {
-            worldVisitCachedDestinations.AddRange(results);
-            worldVisitCachedError = "";
-        }
-        else
-        {
-            worldVisitCachedError = error;
-        }
-    }
-
     private void SelectWorldVisitDestination(
-        WorldVisitDestination selected)
-    {
-        // Reuses the previously tested callback,
-        // after validating the Patch 7.58 native list.
-        SelectWorldVisitDestinationLegacy(selected);
-    }
-    private void SelectWorldVisitDestinationLegacy(
         WorldVisitDestination selected)
     {
         if (worldVisitPending || IsBusy())
@@ -615,19 +385,6 @@ public sealed unsafe partial class Plugin
             }
         }
 
-        ImGui.Spacing();
-
-        if (ImGui.SmallButton("Copy diagnostics"))
-        {
-            ImGui.SetClipboardText(
-                BuildWorldVisitSelectionReport() +
-                BuildWorldVisitJourneyReport() +
-                BuildWorldVisitNativeLayoutReport() +
-                BuildWorldVisitNativeInputReport());
-        }
-
-        ImGui.TextDisabled(
-            "DEV6 FIX2: Native selection; manual confirmation with decline tracking.");
     }
     private static void CollectWorldVisitNativeText(
         AtkUldManager* manager,
@@ -674,61 +431,6 @@ public sealed unsafe partial class Plugin
         }
     }
 
-    private string BuildWorldVisitNativeLayoutReport()
-    {
-        var report = new System.Text.StringBuilder();
-
-        report.AppendLine();
-        report.AppendLine("=== PATCH 7.58 WORLD VISIT NATIVE LAYOUT ===");
-
-        var addon = GetAddon("WorldTravelSelect");
-
-        if (addon == null)
-        {
-            report.AppendLine("WorldTravelSelect: not open.");
-            return report.ToString();
-        }
-
-        report.AppendLine("WorldTravelSelect: visible.");
-        report.AppendLine(
-            "AtkValuesCount: " + addon->AtkValuesCount);
-
-        if (addon->AtkValues != null)
-        {
-            int count = Math.Min(
-                (int)addon->AtkValuesCount, 32);
-
-            for (int i = 0; i < count; i++)
-            {
-                var value = addon->AtkValues[i];
-                string detail = "";
-
-                if (value.Type == AtkValueType.Int)
-                    detail = value.Int.ToString();
-                else if (value.Type == AtkValueType.UInt)
-                    detail = value.UInt.ToString();
-
-                report.AppendLine(
-                    "AtkValue[" + i + "] " +
-                    value.Type + " " + detail);
-            }
-        }
-
-        var labels = new List<string>();
-
-        CollectWorldVisitNativeText(
-            &addon->UldManager, labels);
-
-        report.AppendLine("Visible native text labels:");
-
-        foreach (string label in labels)
-            report.AppendLine("  " + label);
-
-        report.AppendLine(
-            "Diagnostic only: no native selection callback sent.");
-
-        return report.ToString();
-    }
     private string BuildWorldVisitSelectionReport()
     {
         var output = new System.Text.StringBuilder();

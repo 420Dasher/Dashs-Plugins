@@ -1,89 +1,70 @@
-# AethernetAssist v0.2.0
+# AethernetAssist
 
 Dalamud API 15 / .NET 10
 
-A contextual FFXIV travel helper for Aethernet,
-housing, residential, Cosmic Exploration and
-same-data-center World Visit.
+Current stable: v3.0.0.0
+Testing release candidate: v3.0.9.0
 
 ## Features
 
-### City Aethernet
-- Nearby Aethernet detection
-- Destination and attunement checks
-- Native city Aethernet travel
-- Context-sensitive navigation window
+- City Aethernet navigation and attunement checks
+- Housing ward and residential Aethernet travel
+- Supported housing gate navigation
+- Cosmic Exploration planet and local Aethernet travel
+- Overworld Aetheryte and supported map navigation
+- European Light and Chaos World Visit
+- Automatic inheritance of the active Dalamud theme
 
-### Housing and Residential Aethernet
-- Mist, Lavender Beds, Goblet, Shirogane,
-  and Empyreum
-- Main and subdivision residential Aethernet
-- Ward selection and supported city access
-- Supported housing entrance navigation
+## DC Travel
 
-### Cosmic Exploration
-- Cosmic Exploration planet travel
-- Local Cosmic Aethernet destinations
-- Four supported Cosmic Exploration planets
-- Guarded native destination selection
+Available at eligible main-city Aetherytes in
+Limsa Lominsa, New Gridania and Ul'dah.
 
-### Same-DC World Visit
-- Available from the main Aetherytes in
-  Limsa Lominsa, New Gridania and Ul'dah
-- Shows worlds on the current data center
-- Automatically opens the native World Visit menu
-- Validates and selects the requested destination
-- Confirms only a verified destination-specific prompt
-- Monitors World Visit progress without retries
-- Detects the new current world after arrival
+All 16 public Light and Chaos worlds appear in
+two grouped columns.
+
+Selecting a destination initiates the native
+World Visit workflow. The plugin:
+
+1. Opens the native World Visit menu.
+2. Selects Light or Chaos when necessary.
+3. Validates the displayed eight-world list.
+4. Selects the exact requested world.
+5. Automatically confirms only the exact native
+   destination-specific confirmation prompt.
+6. Monitors the native queue and arrival.
+
+Unknown prompts and disabled confirmation buttons
+are not accepted automatically.
+
+FFXIV controls accepted and queued transfers.
+Stopping plugin monitoring cannot cancel a
+World Visit that FFXIV has already accepted.
+
+## Appearance
+
+AethernetAssist inherits the client's active
+Dalamud/ImGui colors and styling dynamically.
+There is no separate theme selector or saved
+theme palette.
 
 ## Commands
 
-- /anet - Open the travel window
-- /anet housing - Open the Housing page
+- /anet - Open the navigation window
+- /anet housing - Open Housing
 - /anet settings - Open settings
 - /anet debug - Toggle diagnostics
-- /anet cancel - Stop supported active automation
+- /anet cancel - Stop supported automation
 - /anet sinus - Cosmic travel to Sinus Ardorum
 - /anet phaenna - Cosmic travel to Phaenna
 - /anet oizys - Cosmic travel to Oizys
 - /anet auxesia - Cosmic travel to Auxesia
 
-## Important limits
+## Testing and release policy
 
-- World Visit supports the same data center only.
-- Cross-data-center travel is not supported.
-- World Visit queues belong to FFXIV.
-- A queued World Visit cannot be cancelled by
-  AethernetAssist.
-- No repeated World Visit requests are issued after
-  native confirmation.
-- Unknown or localized confirmation prompts require
-  manual player confirmation.
+Version 3.0.9.0 is a testing release candidate.
+Stable remains v3.0.0.0 until regression tests
+and explicit stable promotion.
 
-## Stable release - v0.2.0
-
-First feature-complete stable milestone.
-
-Includes:
-- City and residential Aethernet travel
-- Housing ward travel and supported gate navigation
-- Cosmic Exploration planet and local Aethernet travel
-- Same-data-center World Visit
-- Remembered navigation tabs
-- Context-sensitive auto-open and auto-close
-- Guarded native destination selection and retries
-
-The native travel implementation is carried forward
-from the verified v0.1.7 testing release.
-
-## Planned features
-
-- Regular overworld Aetheryte travel
-- Map marker integration
-- Automatic multi-stage Aethernet routing
-
-These features are not part of v0.2.0.
-
-Historical development notes are kept in
-KNOWN_ISSUES.md and Git history.
+Historical development records remain available
+in KNOWN_ISSUES.md and Git history.

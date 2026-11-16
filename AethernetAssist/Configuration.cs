@@ -18,9 +18,9 @@ public sealed class Configuration : IPluginConfiguration
     // Restore the route confirmation window for debugging.
     public bool ConfirmMapRoutes { get; set; } = false;
     public float OpenRange { get; set; } = 11.1f;
-    public bool UseDalamudColors { get; set; } = false;
+
     public int HousingDistrictIndex { get; set; } = 0;
     public int HousingWard { get; set; } = 1;
     public int LastSelectedNavigationPage { get; set; } = -1;
-    public uint[] MatchedStyleColors { get; set; } = System.Array.Empty<uint>();
+
 }

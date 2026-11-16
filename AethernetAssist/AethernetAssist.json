@@ -2,7 +2,7 @@
     "Author":  "Dash + AI",
     "Name":  "AethernetAssist",
     "InternalName":  "AethernetAssist",
-    "AssemblyVersion":  "3.0.8.0",
+    "AssemblyVersion":  "3.0.9.0",
     "DalamudApiLevel":  15,
     "ApplicableVersion":  "any",
     "LoadRequiredState":  0,
@@ -10,7 +10,7 @@
     "CanUnloadAsync":  false,
     "LoadPriority":  0,
     "Punchline":  "Map-based Aetheryte and Aethernet navigation.",
-    "Description":  "Click supported Aetherytes or Aethernet shards on the map to travel automatically. AethernetAssist handles teleports and walking to nearby crystals when needed. It also provides a compact interface for city and residential Aethernet, housing ward travel, Cosmic Exploration, and same-data-center World Visit.",
+    "Description":  "Click supported Aetherytes or Aethernet shards on the map to travel automatically. AethernetAssist handles teleports and walking to nearby crystals when needed. It also provides a compact interface for city and residential Aethernet, housing ward travel, Cosmic Exploration, and Light and Chaos World Visit.",
     "Tags":  [
                  "aethernet",
                  "aetheryte",

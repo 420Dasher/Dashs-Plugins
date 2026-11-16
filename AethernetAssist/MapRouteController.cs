@@ -1450,11 +1450,7 @@ public sealed unsafe partial class Plugin
         if (!mapRouteWindowOpen)
             return;
 
-        PushTheme();
-
-        try
-        {
-            ImGui.SetNextWindowSize(
+        ImGui.SetNextWindowSize(
                 new Vector2(356f, 156f),
                 ImGuiCond.FirstUseEver
             );
@@ -1574,10 +1570,5 @@ public sealed unsafe partial class Plugin
             }
 
             mapRouteWindowOpen = open && mapRouteWindowOpen;
-        }
-        finally
-        {
-            ImGui.PopStyleColor(ThemePushCount);
-        }
     }
 }
