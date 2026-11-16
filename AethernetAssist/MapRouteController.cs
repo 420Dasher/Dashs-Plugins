@@ -320,10 +320,10 @@ public sealed unsafe partial class Plugin
                     return true;
                 }
 
-                reason =
-                    "No loaded local crystal found nearby. " +
-                    "Approach a shard or review the paid alternative.";
-                return false;
+                // No eligible same-city source within the
+                // discovery radius. Continue to the existing
+                // paid main-Aetheryte quote below.
+                // Consent is checked by the existing route dispatcher.
             }
         }
 
