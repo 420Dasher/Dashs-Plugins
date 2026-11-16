@@ -53,6 +53,8 @@ public sealed unsafe partial class Plugin
 
     private int worldVisitInteractions;
     private int worldVisitMenuCallbacks;
+    private bool worldVisitDcSwitchSubmitted;
+    private int worldVisitRequestedDc = -1;
 
     private string worldVisitJourneyStatus =
         "Select a destination to begin World Visit.";
@@ -336,6 +338,8 @@ public sealed unsafe partial class Plugin
         worldVisitConfirmationSent = false;
         worldVisitSawQueue = false;
         worldVisitPending = false;
+        worldVisitDcSwitchSubmitted = false;
+        worldVisitRequestedDc = -1;
 
         worldVisitJourneyDetails =
             "From=" + from.Name.ToString() +
@@ -353,6 +357,52 @@ public sealed unsafe partial class Plugin
             SetWorldVisitPhase(WorldVisitPhase.Interact);
     }
 
+    private bool TrySubmitVerifiedWorldVisitTarget(
+        WorldVisitDestination target,
+        out string error)
+    {
+        error = "";
+
+        if (worldVisitPending ||
+            GetAddon("SelectYesno") != null)
+        {
+            error = "Native selection already pending.";
+            return false;
+        }
+
+        if (!TryReadWorldVisitDestinations(
+            out var nativeWorlds, out error))
+            return false;
+
+        var matches = nativeWorlds
+            .Where(x =>
+                x.WorldId == target.WorldId &&
+                string.Equals(
+                    x.Name, target.Name,
+                    StringComparison.OrdinalIgnoreCase) &&
+                !x.Current)
+            .ToArray();
+
+        if (matches.Length != 1)
+        {
+            error = "Target not found in native list: " +
+                target.Name;
+            return false;
+        }
+
+        SelectWorldVisitDestination(matches[0]);
+
+        if (!worldVisitPending)
+        {
+            error = worldVisitSelectionStatus;
+            return false;
+        }
+
+        worldVisitJourneyDetails +=
+            " | Selected index=" + matches[0].Index;
+
+        return true;
+    }
     private bool TryChooseWorldVisitMenu()
     {
         var selector =
@@ -472,36 +522,67 @@ public sealed unsafe partial class Plugin
         if (worldVisitPhase ==
             WorldVisitPhase.AwaitNativeWorldSelection)
         {
-            // No world selection or travel callback in DEV5.
-            // The native menu is available for manual testing.
-            if (GetAddon("SelectYesno") != null)
+            if (stageSeconds > 12)
             {
-                worldVisitJourneyStatus =
-                    "Native confirmation opened. " +
-                    "No automatic transfer submitted.";
+                StopWorldVisit(
+                    "Native DC switch verification timed out.");
                 return;
             }
 
-            if (GetAddon("WorldTravelSelect") != null)
+            var addon = GetAddon("WorldTravelSelect");
+
+            if (addon == null ||
+                addon->AtkValues == null ||
+                addon->AtkValuesCount != 15)
             {
                 worldVisitJourneyStatus =
-                    "Native menu open: select " +
+                    "Waiting for native World Visit window...";
+                return;
+            }
+
+            var selectedDc = addon->AtkValues[11];
+
+            if (selectedDc.Type != AtkValueType.UInt ||
+                selectedDc.UInt != (uint)worldVisitRequestedDc)
+            {
+                worldVisitJourneyStatus =
+                    "Waiting for " +
                     WorldVisitDcName(target.Name) +
-                    " / " + target.Name +
-                    " manually.";
+                    " selection...";
                 return;
             }
 
-            StopWorldVisit(
-                "Native World Visit menu closed.");
+            if (!TrySubmitVerifiedWorldVisitTarget(
+                target, out var error))
+            {
+                worldVisitJourneyStatus =
+                    "Validating switched DC: " + error;
+                return;
+            }
+
+            worldVisitJourneyDetails +=
+                " | Native DC switch verified";
+
+            SetWorldVisitPhase(WorldVisitPhase.Confirm);
+
+            worldVisitJourneyStatus =
+                "Selected " + target.Name +
+                ". Awaiting native confirmation...";
             return;
         }
-
         if (worldVisitPhase == WorldVisitPhase.WaitForArrival)
         {
-            // FFXIV owns the accepted transfer.
-            // Never timeout or repeat the travel callback.
-            // Only verified arrival ends monitoring.
+            // FFXIV owns any accepted transfer.
+            // Never retry selection or confirmation.
+            if (!worldVisitSawQueue &&
+                !busy &&
+                stageSeconds > 35)
+            {
+                StopWorldVisit(
+                    "No transfer observed after manual " +
+                    "confirmation closed.");
+            }
+
             return;
         }
 
@@ -639,15 +720,97 @@ public sealed unsafe partial class Plugin
 
         if (worldVisitPhase == WorldVisitPhase.SelectWorld)
         {
-            if (GetAddon("WorldTravelSelect") == null)
+            var addon = GetAddon("WorldTravelSelect");
+
+            if (addon == null)
                 return;
 
-            SetWorldVisitPhase(
-                WorldVisitPhase.AwaitNativeWorldSelection);
+            if (GetAddon("SelectYesno") != null)
+            {
+                StopWorldVisit(
+                    "Another confirmation is already open.");
+                return;
+            }
+
+            if (!TryReadWorldVisitDestinations(
+                out var initialWorlds, out var error))
+            {
+                worldVisitJourneyStatus =
+                    "Validating native list: " + error;
+                return;
+            }
+
+            int requestedDc =
+                WorldVisitDcName(target.Name) == "Light"
+                    ? 1 : 0;
+
+            var dc = addon->AtkValues[11];
+
+            if (dc.Type != AtkValueType.UInt ||
+                dc.UInt > 1)
+            {
+                StopWorldVisit(
+                    "Native DC state is invalid.");
+                return;
+            }
+
+            worldVisitRequestedDc = requestedDc;
+
+            if (dc.UInt != (uint)requestedDc)
+            {
+                if (worldVisitDcSwitchSubmitted)
+                {
+                    StopWorldVisit(
+                        "Duplicate DC callback prevented.");
+                    return;
+                }
+
+                AtkValue* values = stackalloc AtkValue[2];
+
+                values[0] = new AtkValue
+                {
+                    Type = AtkValueType.Int,
+                    Int = 1
+                };
+
+                values[1] = new AtkValue
+                {
+                    Type = AtkValueType.Int,
+                    Int = requestedDc
+                };
+
+                // Native tab callback: (1, DC index).
+                // Observed mapping: Chaos=0, Light=1.
+                worldVisitDcSwitchSubmitted = true;
+
+                worldVisitJourneyDetails +=
+                    " | DC callback=1," + requestedDc;
+
+                addon->FireCallback(2, values, true);
+
+                SetWorldVisitPhase(
+                    WorldVisitPhase.AwaitNativeWorldSelection);
+
+                worldVisitJourneyStatus =
+                    "Switching native World Visit to " +
+                    WorldVisitDcName(target.Name) + "...";
+                return;
+            }
+
+            // No DC change needed.
+            if (!TrySubmitVerifiedWorldVisitTarget(
+                target, out error))
+            {
+                worldVisitJourneyStatus =
+                    "Validating destination: " + error;
+                return;
+            }
+
+            SetWorldVisitPhase(WorldVisitPhase.Confirm);
 
             worldVisitJourneyStatus =
-                "Native menu opened for " + target.Name +
-                ". Manual DC/world selection required in DEV5.";
+                "Selected " + target.Name +
+                ". Awaiting native confirmation...";
             return;
         }
         if (worldVisitPhase == WorldVisitPhase.Confirm)
@@ -666,58 +829,34 @@ public sealed unsafe partial class Plugin
             worldVisitJourneyDetails +=
                 " | Confirmation=" + prompt;
 
-            // Live World Visit diagnostic confirmed the
-            // native prompt format: "Travel to Shiva?"
-            //
-            // Only approve an exact destination match.
-            // Localized or unrecognized prompts fall
-            // back to manual confirmation.
-            string expectedPrompt =
+            string expected =
                 "Travel to " + target.Name + "?";
 
-            bool verifiedPrompt = string.Equals(
-                prompt,
-                expectedPrompt,
-                StringComparison.OrdinalIgnoreCase);
-
-            if (!verifiedPrompt ||
-                yesno->YesButton == null ||
-                !yesno->YesButton->IsEnabled)
+            if (!string.Equals(
+                prompt, expected,
+                StringComparison.OrdinalIgnoreCase))
             {
-                SetWorldVisitPhase(
-                    WorldVisitPhase.ManualConfirmation);
-
-                worldVisitJourneyStatus =
-                    "Verify and confirm " + target.Name +
-                    " manually.";
+                StopWorldVisit(
+                    "Native confirmation mismatch. " +
+                    "No travel confirmation sent.");
                 return;
             }
 
-            AtkValue answer = new()
-            {
-                Type = AtkValueType.Int,
-                Int = 0
-            };
-
-            yesno->AtkUnitBase.FireCallback(
-                1, &answer, true);
-
-            worldVisitConfirmationSent = true;
-
+            // DEV6: Player must confirm or decline.
+            // Never submit the native Yes callback.
             SetWorldVisitPhase(
-                WorldVisitPhase.WaitForArrival);
+                WorldVisitPhase.ManualConfirmation);
 
             worldVisitJourneyStatus =
-                "World Visit requested: " + target.Name;
-
+                "Verified: " + prompt +
+                " Confirm or decline manually.";
             return;
         }
     }
-
     private string BuildWorldVisitJourneyReport()
     {
         return
-            "\n=== SAME-DC WORLD VISIT ===\n" +
+            "\n=== WORLD VISIT JOURNEY ===\n" +
             "Phase: " + worldVisitPhase + "\n" +
             "Target: " +
                 (worldVisitTarget?.Name ?? "None") + "\n" +
@@ -728,6 +867,10 @@ public sealed unsafe partial class Plugin
             "Status: " + worldVisitJourneyStatus + "\n" +
             "Interactions: " + worldVisitInteractions + "\n" +
             "Menu callbacks: " + worldVisitMenuCallbacks + "\n" +
+            "DC switch submitted: " +
+                worldVisitDcSwitchSubmitted + "\n" +
+            "Requested DC flag: " +
+                worldVisitRequestedDc + "\n" +
             "Native selection submitted: " +
                 worldVisitPending + "\n" +
             "Confirmation submitted: " +

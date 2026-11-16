@@ -355,16 +355,10 @@ public sealed unsafe partial class Plugin
     private void SelectWorldVisitDestination(
         WorldVisitDestination selected)
     {
-        // Patch 7.58 DEV1: the DC dropdown changes the
-        // native selector. Never guess callback indices.
-        // Resume automatic World Visit only after mapping
-        // and validating the new native menu.
-        worldVisitSelectionStatus =
-            "Patch 7.58 native World Visit selection " +
-            "is awaiting compatibility verification.";
-        return;
+        // Reuses the previously tested callback,
+        // after validating the Patch 7.58 native list.
+        SelectWorldVisitDestinationLegacy(selected);
     }
-
     private void SelectWorldVisitDestinationLegacy(
         WorldVisitDestination selected)
     {
@@ -571,7 +565,7 @@ public sealed unsafe partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "DEV5: Opens native menu; world/transfer confirmation manual.");
+            "DEV6: Native DC/world selection; final confirmation manual.");
     }
     private static void CollectWorldVisitNativeText(
         AtkUldManager* manager,
