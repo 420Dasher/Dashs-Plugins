@@ -1,20 +1,50 @@
-# AethernetAssist - Known Issues and Development History
+# AethernetAssist — Current Status and Development History
 
-## Stable v0.2.0 status
+## Stable release v3.1.0
 
-This document preserves historical development notes.
-Older statements about unimplemented features or pending
-tests may no longer reflect the stable release.
+The following features have passed in-game testing.
 
-City, residential, housing, Cosmic Exploration and
-same-DC World Visit travel were validated during testing.
+### City and map routing
+- Local area map-click integration
+- Regular city Aetheryte and Aethernet routing
+- Cross-district same-city free routing
+- 50y source discovery and 70y calculated-path limit
+- Nearest eligible source-first path attempts
+- Paid main-Aetheryte fallback for distant subnet routes
+- Payment consent and manual movement safeguards
 
-Native callback readiness and retry handling were
-improved through v0.1.7. Intermittent native-menu
-non-acknowledgment remains worth monitoring.
+### Residential and Housing
+- Residential map clicks for wards and subdivisions
+- All five residential districts
+- Main-division and subdivision travel
+- Native destination validation
+- Arrival detection and guarded callbacks
+- Housing ward travel and supported gate movement
 
-Regular overworld Aetheryte support and map-click
-routing are planned for later versions.
+### Other features
+- Cosmic Exploration planet and local Aethernet travel
+- Light and Chaos same-data-center World Visit
+- Automatic Dalamud theme inheritance
+
+### Release regression results
+- Residential main/subdivision travel passed repeated tests.
+- Cross-district city routing passed for Gridania, Limsa
+  Lominsa and Ul'dah.
+- Distant subnet paid fallback and subsequent Aethernet
+  travel passed.
+- Paid confirmation settings and manual movement
+  cancellation passed.
+- World Visit, Housing and regular map routing passed.
+
+### Diagnostic modules
+
+The on-demand Cosmic/native research reports remain
+available for troubleshooting. They are intentionally
+retained because they are still used by the diagnostics.
+
+Older entries below are historical records from their
+original development stages. Their pending-feature notes
+and version labels may no longer describe current behavior.
 
 ## Historical development notes
 
