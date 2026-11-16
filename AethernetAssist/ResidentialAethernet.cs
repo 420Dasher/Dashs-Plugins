@@ -452,10 +452,19 @@ public sealed unsafe partial class Plugin
             return;
         }
 
-        // We only enable native state 0 in TEST1.
-        // State 3/4 may represent current or unavailable
-        // destinations and must not be forced.
-        if (state.UInt != 0)
+        // DEV10 FIX1: The Brimming Heart in the Goblet
+        // has been manually verified as accessible despite
+        // the native menu reporting state 4.
+        // Never permit state 4 for other destinations.
+        bool verifiedBrimmingHeart =
+            state.UInt == 4 &&
+            Client.TerritoryType == 341 &&
+            string.Equals(
+                Clean(residentialTarget.Name),
+                "The Brimming Heart",
+                StringComparison.OrdinalIgnoreCase);
+
+        if (state.UInt != 0 && !verifiedBrimmingHeart)
         {
             StopResidential(
                 "Destination is current, locked, or unavailable. " +
