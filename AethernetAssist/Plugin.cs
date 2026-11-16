@@ -170,6 +170,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         LoadCosmicLocalNetworks();
         LoadOverworldAetherytes();
         InitializeMapClickResearch();
+        InitializeWorldVisitConfirmationObserver();
 
         Commands.AddHandler("/anet", new CommandInfo(OnCommand)
         {
@@ -194,6 +195,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         StopCosmicPath();
         // Temporary native addon capture removed.
         cosmicPhase = CosmicPhase.Idle;
+        DisposeWorldVisitConfirmationObserver();
         DisposeMapClickResearch();
         Framework.Update -= Update;
 
@@ -1208,30 +1210,28 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
             : null;
     }
 
-    // 17 UI colors in a stable, serialized order.
-    // The default palette preserves our existing dark theme.
-    private static readonly Vector4[] DefaultColors =
+    // Read the current ImGui/Dalamud style directly.
+    // No snapshots, saved palettes or manual synchronization.
+    private static readonly ImGuiCol[] LiveThemeColors =
     {
-        new(0.065f, 0.080f, 0.105f, 0.97f), // 0 Window
-        new(0.077f, 0.095f, 0.120f, 0.95f), // 1 Child
-        new(0.86f, 0.89f, 0.93f, 1f),        // 2 Text
-        new(0.51f, 0.58f, 0.65f, 1f),        // 3 Muted
-        new(0.51f, 0.76f, 0.92f, 1f),        // 4 Accent
-        new(0.49f, 0.80f, 0.66f, 1f),        // 5 Ready
-        new(0.14f, 0.20f, 0.26f, 0.95f),     // 6 Hover
-        new(0.075f, 0.09f, 0.115f, 1f),      // 7 Scroll BG
-        new(0.26f, 0.34f, 0.42f, 0.9f),       // 8 Scroll grab
-        new(0.40f, 0.55f, 0.67f, 1f),        // 9 Scroll hover
-        new(0.10f, 0.14f, 0.18f, 1f),        // 10 Frame
-        new(0.18f, 0.25f, 0.32f, 1f),        // 11 Frame hover
-        new(0.11f, 0.16f, 0.20f, 1f),        // 12 Button
-        new(0.22f, 0.27f, 0.32f, 1f),        // 13 Border
-        new(0.18f, 0.26f, 0.32f, 1f),        // 14 Button active
-        new(0.055f, 0.065f, 0.085f, 1f),     // 15 Title
-        new(0.085f, 0.12f, 0.15f, 1f)        // 16 Active title
+        ImGuiCol.WindowBg,
+        ImGuiCol.ChildBg,
+        ImGuiCol.Text,
+        ImGuiCol.TextDisabled,
+        ImGuiCol.CheckMark,
+        ImGuiCol.PlotHistogram,
+        ImGuiCol.ButtonHovered,
+        ImGuiCol.ScrollbarBg,
+        ImGuiCol.ScrollbarGrab,
+        ImGuiCol.ScrollbarGrabHovered,
+        ImGuiCol.FrameBg,
+        ImGuiCol.FrameBgHovered,
+        ImGuiCol.Button,
+        ImGuiCol.Border,
+        ImGuiCol.ButtonActive,
+        ImGuiCol.TitleBg,
+        ImGuiCol.TitleBgActive
     };
-
-    private uint[] sampledClientColors = Array.Empty<uint>();
 
     private Vector4 NavAccent => ThemeColor(4);
     private Vector4 NavMuted => ThemeColor(3);
@@ -1239,84 +1239,8 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
 
     private Vector4 ThemeColor(int index)
     {
-        var colors = config.MatchedStyleColors;
-
-        if (!config.UseDalamudColors ||
-            colors == null ||
-            colors.Length != DefaultColors.Length)
-            return DefaultColors[index];
-
-        uint packed = colors[index];
-
-        // ImGui packs colors as ABGR.
-        return new Vector4(
-            (packed & 255u) / 255f,
-            ((packed >> 8) & 255u) / 255f,
-            ((packed >> 16) & 255u) / 255f,
-            ((packed >> 24) & 255u) / 255f);
+        return *ImGui.GetStyleColorVec4(LiveThemeColors[index]);
     }
-
-    private static uint[] CaptureDalamudColors()
-    {
-        // Always called before our own style overrides.
-        ImGuiCol[] sources =
-        {
-            ImGuiCol.WindowBg,
-            ImGuiCol.ChildBg,
-            ImGuiCol.Text,
-            ImGuiCol.TextDisabled,
-            ImGuiCol.CheckMark,
-            ImGuiCol.PlotHistogram,
-            ImGuiCol.HeaderHovered,
-            ImGuiCol.ScrollbarBg,
-            ImGuiCol.ScrollbarGrab,
-            ImGuiCol.ScrollbarGrabHovered,
-            ImGuiCol.FrameBg,
-            ImGuiCol.FrameBgHovered,
-            ImGuiCol.Button,
-            ImGuiCol.Border,
-            ImGuiCol.ButtonActive,
-            ImGuiCol.TitleBg,
-            ImGuiCol.TitleBgActive
-        };
-
-        var result = new uint[sources.Length];
-
-        for (int i = 0; i < sources.Length; i++)
-        {
-            result[i] = ImGui.ColorConvertFloat4ToU32(
-                *ImGui.GetStyleColorVec4(sources[i]));
-        }
-
-        return result;
-    }
-
-    private const int ThemePushCount = 19;
-
-    private void PushTheme()
-    {
-        // Only this plugins windows are affected.
-        ImGui.PushStyleColor(ImGuiCol.WindowBg, ThemeColor(0));
-        ImGui.PushStyleColor(ImGuiCol.ChildBg, ThemeColor(1));
-        ImGui.PushStyleColor(ImGuiCol.Text, ThemeColor(2));
-        ImGui.PushStyleColor(ImGuiCol.TextDisabled, ThemeColor(3));
-        ImGui.PushStyleColor(ImGuiCol.CheckMark, ThemeColor(4));
-        ImGui.PushStyleColor(ImGuiCol.Button, ThemeColor(12));
-        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, ThemeColor(6));
-        ImGui.PushStyleColor(ImGuiCol.ButtonActive, ThemeColor(14));
-        ImGui.PushStyleColor(ImGuiCol.HeaderHovered, ThemeColor(6));
-        ImGui.PushStyleColor(ImGuiCol.FrameBg, ThemeColor(10));
-        ImGui.PushStyleColor(ImGuiCol.FrameBgHovered, ThemeColor(11));
-        ImGui.PushStyleColor(ImGuiCol.Border, ThemeColor(13));
-        ImGui.PushStyleColor(ImGuiCol.ScrollbarBg, ThemeColor(7));
-        ImGui.PushStyleColor(ImGuiCol.ScrollbarGrab, ThemeColor(8));
-        ImGui.PushStyleColor(ImGuiCol.ScrollbarGrabHovered, ThemeColor(9));
-        ImGui.PushStyleColor(ImGuiCol.SliderGrab, ThemeColor(4));
-        ImGui.PushStyleColor(ImGuiCol.SliderGrabActive, ThemeColor(4));
-        ImGui.PushStyleColor(ImGuiCol.TitleBg, ThemeColor(15));
-        ImGui.PushStyleColor(ImGuiCol.TitleBgActive, ThemeColor(16));
-    }
-
     private enum NavigationPage
     {
         Aethernet,
@@ -1603,10 +1527,6 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         if (!settingsWindowOpen)
             return;
 
-        PushTheme();
-
-        try
-        {
         ImGui.SetNextWindowSize(
             new Vector2(380f, 320f),
             ImGuiCond.FirstUseEver);
@@ -1702,38 +1622,7 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
         }
 
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.TextColored(NavAccent, "APPEARANCE");
-
-        ImGui.TextDisabled(config.UseDalamudColors
-            ? "Using matched Dalamud colors"
-            : "Using default dark palette");
-
-        if (ImGui.Button("Match Dalamud colors"))
-        {
-            // Saved from the active client theme before
-            // either plugin window applies its own colors.
-            if (sampledClientColors.Length == DefaultColors.Length)
-            {
-                config.MatchedStyleColors =
-                    (uint[])sampledClientColors.Clone();
-
-                config.UseDalamudColors = true;
-                Save();
-            }
-        }
-
-        ImGui.SameLine();
-
-        if (ImGui.Button("Default dark"))
-        {
-            config.UseDalamudColors = false;
-            Save();
-        }
-
-        ImGui.Spacing();
-        if (config.ShowDebug &&
+        ImGui.Spacing();        if (config.ShowDebug &&
             ImGui.CollapsingHeader("Diagnostics"))
         {
             bool confirmMap = config.ConfirmMapRoutes;
@@ -1884,11 +1773,6 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
 
         ImGui.End();
         settingsWindowOpen = open;
-        }
-        finally
-        {
-            ImGui.PopStyleColor(ThemePushCount);
-        }
     }
 
     // Only show Housing where a supported housing
@@ -1928,11 +1812,6 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
 
     private void Draw()
     {
-        // Sample the real client palette BEFORE pushing our
-        // own style. This prevents matching our own colors.
-        sampledClientColors = settingsWindowOpen
-            ? CaptureDalamudColors()
-            : Array.Empty<uint>();
 
         // Settings, routes and navigation are separate.
         DrawSettings();
@@ -1950,19 +1829,10 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
              ~AvailableNavigationTabsMask()) != 0)
             return;
 
-        const float width = 386f;
+        float width = currentPage == NavigationPage.DcTravel
+            ? 536f : 386f;
 
-        PushTheme();
-
-        ImGui.PushStyleVar(
-            ImGuiStyleVar.ItemSpacing,
-            new Vector2(7f, 3f));
-
-        ImGui.PushStyleVar(ImGuiStyleVar.ScrollbarSize, 7f);
-
-        try
-        {
-            ImGui.SetNextWindowSize(
+        ImGui.SetNextWindowSize(
                 new Vector2(width, 195f),
                 ImGuiCond.FirstUseEver);
 
@@ -1999,8 +1869,8 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
             ImGui.PopStyleColor(3);
             ImGui.Spacing();
 
-            // Same-DC World Visit is only accessible at
-            // the three eligible main city Aetherytes.
+            // World Visit is available at the three
+            // eligible main city Aetherytes.
             bool housingAvailable = HousingPageAvailable();
             bool dcTravelAvailable =
                 WorldVisitPageAvailable() ||
@@ -2079,17 +1949,17 @@ public sealed unsafe partial class Plugin : IDalamudPlugin
                 ImGui.GetCursorPosY() +
                 ImGui.GetStyle().WindowPadding.Y + 3f;
 
+            float pageWidth =
+                currentPage == NavigationPage.DcTravel
+                    ? 536f : 386f;
+
             ImGui.SetWindowSize(
-                new Vector2(width, MathF.Max(132f, naturalHeight)),
+                new Vector2(
+                    pageWidth,
+                    MathF.Max(132f, naturalHeight)),
                 ImGuiCond.Always);
 
             ImGui.End();
             windowOpen = open;
-        }
-        finally
-        {
-            ImGui.PopStyleVar(2);
-            ImGui.PopStyleColor(ThemePushCount);
-        }
     }
 }

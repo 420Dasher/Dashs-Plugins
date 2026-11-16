@@ -370,9 +370,23 @@ public sealed unsafe partial class Plugin
             }
         }
 
+        // Both main-Aetheryte and subnet map destinations
+        // use the same paid fallback after free paths fail.
+        // For subnet targets the paid leg reaches main first;
+        // the existing controller then completes the Aethernet leg.
+        if (mapRouteWalkingLocal &&
+            mapRouteTarget is { } localTarget)
+        {
+            MapRouteFallbackToPaid(
+                localTarget,
+                main,
+                failureReason);
+            return;
+        }
+
         StopMapRoute(
-            "No navigable walking path to a usable Aetheryte. " +
-            "No interaction or paid teleport attempted."
+            "No navigable free path to the requested destination. " +
+            "Checking the paid main-Aetheryte alternative."
         );
     }
 }

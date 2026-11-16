@@ -125,7 +125,8 @@ public sealed unsafe partial class Plugin
     private bool MapClickCaptureActive() =>
         mapRouteInputEnabled &&
         !mapRouteAutoPending &&
-        mapRoutePhase == MapRoutePhase.Idle;
+        mapRoutePhase == MapRoutePhase.Idle &&
+        residentialPhase == ResidentialPhase.Idle;
 
     private void OnMapRoutingHoverEvent(
         AgentEvent stage,
@@ -513,6 +514,9 @@ public sealed unsafe partial class Plugin
             return;
         }
 
+        if (TryHandleResidentialMapClick(hover))
+            return;
+
         // This is still an observational safety gate.
         // A match proves continuity of the hovered marker,
         // not permission to teleport.
@@ -645,6 +649,119 @@ public sealed unsafe partial class Plugin
         PrepareMapRoute(destination.RowId);
     }
 
+    // DEV10: Resolve housing markers separately from regular Aetherytes.
+    // Reject conflicting IDs and ambiguous destinations.
+    private bool TryHandleResidentialMapClick(MapHoverCandidate hover)
+    {
+        if (hover.DataType != 4 ||
+            hover.Territory != Client.TerritoryType ||
+            !TryGetResidentialDistrict(out _) ||
+            !residentialNetworks.TryGetValue(hover.Territory, out var stops))
+            return false;
+
+        var idMatches = new HashSet<uint>();
+        var nameMatches = new HashSet<uint>();
+
+        foreach (var row in Data.GetExcelSheet<HousingAethernet>())
+        {
+            if (row.TerritoryType.RowId != hover.Territory ||
+                !stops.Any(stop => stop.Id == row.RowId))
+                continue;
+
+            if (hover.DataKey != 0 &&
+                row.PlaceName.RowId == hover.DataKey)
+                idMatches.Add(row.RowId);
+
+            if (!string.IsNullOrWhiteSpace(hover.Tooltip) &&
+                string.Equals(
+                    Clean(row.PlaceName.Value.Name.ToString()),
+                    hover.Tooltip,
+                    StringComparison.OrdinalIgnoreCase))
+                nameMatches.Add(row.RowId);
+        }
+
+        if (idMatches.Count > 1 || nameMatches.Count > 1 ||
+            (idMatches.Count == 1 && nameMatches.Count == 1 &&
+             !idMatches.SetEquals(nameMatches)))
+        {
+            AppendMapClickRecord(
+                "Residential map marker rejected: conflicting or " +
+                $"ambiguous IDs. key={hover.DataKey}, " +
+                $"tooltip='{hover.Tooltip}', " +
+                $"ID matches=[{string.Join(",", idMatches)}], " +
+                $"name matches=[{string.Join(",", nameMatches)}].");
+            return true;
+        }
+
+        uint resolvedId = idMatches.Count == 1
+            ? idMatches.First()
+            : nameMatches.Count == 1
+                ? nameMatches.First()
+                : 0;
+
+        var matchingStops = stops
+            .Where(stop => stop.Id == resolvedId)
+            .Take(2)
+            .ToArray();
+
+        if (resolvedId == 0 || matchingStops.Length != 1)
+        {
+            AppendMapClickRecord(
+                "Residential marker not resolved: " +
+                $"territory={hover.Territory}, " +
+                $"map={hover.MapId}, type={hover.DataType}, " +
+                $"key={hover.DataKey}, sub={hover.SubKey}, " +
+                $"icon={hover.IconId}, " +
+                $"tooltip='{hover.Tooltip}'. No travel attempted.");
+            return true;
+        }
+
+        if (!MapRouteCanStart())
+        {
+            AppendMapClickRecord(
+                "Residential map click ignored: another journey is active.");
+            return true;
+        }
+
+        // The verified residential controller requires a nearby
+        // source shard. Never guess a source or start an
+        // unverified movement route.
+        if (!TryFindResidentialShard(out var source) ||
+            source == null)
+        {
+            AppendMapClickRecord(
+                "Residential destination recognized: " +
+                matchingStops[0].Name +
+                ". No source shard is within interaction range. " +
+                "Move near a shard and click again.");
+            return true;
+        }
+
+        var stop = matchingStops[0];
+
+        mapClickPreview =
+            $"Residential Aethernet: {stop.Name} (ID {stop.Id})";
+
+        // Map-originated residential travel must leave the
+        // navigation window visible throughout the operation.
+        currentPage = NavigationPage.Aethernet;
+        RememberNavigationPage(NavigationPage.Aethernet);
+        autoWindowOwnsVisibility = false;
+        windowOpen = true;
+
+        StartResidentialTravel(stop, keepWindowOpen: true);
+
+        AppendMapClickRecord(
+            residentialPhase == ResidentialPhase.Idle
+                ? "Residential destination resolved, but travel " +
+                  "did not start: " + stop.Name
+                : "Residential map travel started: " + stop.Name +
+                  $" (HousingAethernet ID {stop.Id}, " +
+                  $"territory {hover.Territory}, " +
+                  $"marker {hover.DataKey}).");
+
+        return true;
+    }
     private void AppendMapClickRecord(string value)
     {
         mapClickRecords.Add(
