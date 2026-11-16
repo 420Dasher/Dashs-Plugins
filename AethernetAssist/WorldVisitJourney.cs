@@ -51,6 +51,16 @@ public sealed unsafe partial class Plugin
     private bool worldVisitConfirmationSent;
     private bool worldVisitSawQueue;
 
+    private enum WorldVisitManualDecision
+    {
+        Unknown,
+        Accepted,
+        Declined
+    }
+
+    private WorldVisitManualDecision worldVisitManualDecision =
+        WorldVisitManualDecision.Unknown;
+
     private int worldVisitInteractions;
     private int worldVisitMenuCallbacks;
     private bool worldVisitDcSwitchSubmitted;
@@ -76,8 +86,10 @@ public sealed unsafe partial class Plugin
 
     private bool WorldVisitCanStop()
     {
+        // Stopping monitoring is safe before FFXIV queues
+        // the transfer. It never cancels an accepted
+        // native World Visit.
         return worldVisitPhase != WorldVisitPhase.Idle &&
-               worldVisitPhase != WorldVisitPhase.WaitForArrival &&
                !worldVisitSawQueue &&
                !IsBusy();
     }
@@ -92,6 +104,14 @@ public sealed unsafe partial class Plugin
             worldVisitJourneyStatus =
                 "Transfer is controlled by FFXIV. " +
                 "Queued World Visits cannot be cancelled.";
+            return;
+        }
+
+        if (worldVisitPhase == WorldVisitPhase.WaitForArrival)
+        {
+            StopWorldVisit(
+                "Stopped monitoring. Any accepted transfer " +
+                "remains controlled by FFXIV.");
             return;
         }
 
@@ -118,6 +138,7 @@ public sealed unsafe partial class Plugin
         worldVisitTarget = null;
         worldVisitSourceAddress = nint.Zero;
         worldVisitPending = false;
+        worldVisitUiSelectedWorldId = 0;
 
         worldVisitCachedDestinations.Clear();
         worldVisitCachedAddon = nint.Zero;
@@ -338,6 +359,8 @@ public sealed unsafe partial class Plugin
         worldVisitConfirmationSent = false;
         worldVisitSawQueue = false;
         worldVisitPending = false;
+        worldVisitManualDecision =
+            WorldVisitManualDecision.Unknown;
         worldVisitDcSwitchSubmitted = false;
         worldVisitRequestedDc = -1;
 
@@ -572,15 +595,33 @@ public sealed unsafe partial class Plugin
         }
         if (worldVisitPhase == WorldVisitPhase.WaitForArrival)
         {
+            // Never repeat native selection or confirmation.
             // FFXIV owns any accepted transfer.
-            // Never retry selection or confirmation.
-            if (!worldVisitSawQueue &&
-                !busy &&
-                stageSeconds > 35)
+            if (worldVisitManualDecision ==
+                    WorldVisitManualDecision.Declined &&
+                !worldVisitSawQueue &&
+                !busy)
             {
                 StopWorldVisit(
-                    "No transfer observed after manual " +
-                    "confirmation closed.");
+                    "World Visit declined. Ready for another destination.");
+                return;
+            }
+
+            // A recognized Yes allows longer for the game
+            // to start its transfer. An unrecognized close
+            // gets a conservative observation window.
+            double graceSeconds =
+                worldVisitManualDecision ==
+                    WorldVisitManualDecision.Accepted
+                    ? 35d : 15d;
+
+            if (!worldVisitSawQueue &&
+                !busy &&
+                stageSeconds > graceSeconds)
+            {
+                StopWorldVisit(
+                    "No World Visit transfer observed. " +
+                    "Ready for another destination.");
             }
 
             return;
@@ -588,22 +629,35 @@ public sealed unsafe partial class Plugin
 
         if (worldVisitPhase == WorldVisitPhase.ManualConfirmation)
         {
+            // Check the observed manual decision first.
+            if (worldVisitManualDecision ==
+                    WorldVisitManualDecision.Declined &&
+                !worldVisitSawQueue &&
+                !busy)
+            {
+                StopWorldVisit(
+                    "World Visit declined. Ready for another destination.");
+                return;
+            }
+
             if (GetAddon("SelectYesno") != null)
             {
                 worldVisitJourneyStatus =
                     "Confirm " + target.Name +
                     " manually in the game's dialogue.";
-
                 return;
             }
 
-            // The player may have accepted or declined.
-            // Monitor only; never send another callback.
+            // Dialog closed. Do not assume this means
+            // the player accepted the transfer.
             SetWorldVisitPhase(
                 WorldVisitPhase.WaitForArrival);
 
             worldVisitJourneyStatus =
-                "Waiting for World Visit result...";
+                worldVisitManualDecision ==
+                    WorldVisitManualDecision.Accepted
+                    ? "Transfer accepted. Waiting for FFXIV..."
+                    : "Confirmation closed. Checking for transfer...";
             return;
         }
 
@@ -875,6 +929,8 @@ public sealed unsafe partial class Plugin
                 worldVisitPending + "\n" +
             "Confirmation submitted: " +
                 worldVisitConfirmationSent + "\n" +
+            "Manual decision observed: " +
+                worldVisitManualDecision + "\n" +
             "Saw queue/loading: " + worldVisitSawQueue +
                 "\n" +
             "Details: " + worldVisitJourneyDetails + "\n";

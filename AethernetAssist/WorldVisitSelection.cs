@@ -27,13 +27,13 @@ public sealed unsafe partial class Plugin
     {
         AddonLifecycle.RegisterListener(
             AddonEvent.PreReceiveEvent,
-            new[] { "WorldTravelSelect", "SelectString" },
+            new[] { "WorldTravelSelect", "SelectString", "SelectYesno" },
             OnWorldVisitNativeInput
         );
 
         AddonLifecycle.RegisterListener(
             AddonEvent.PostReceiveEvent,
-            new[] { "WorldTravelSelect", "SelectString" },
+            new[] { "WorldTravelSelect", "SelectString", "SelectYesno" },
             OnWorldVisitNativeInput
         );
     }
@@ -54,6 +54,62 @@ public sealed unsafe partial class Plugin
 
         try
         {
+            // Observe the real native Yes/No button.
+            // Do not intercept or modify the event.
+            if (args.AddonName == "SelectYesno")
+            {
+                if (stage == AddonEvent.PreReceiveEvent &&
+                    worldVisitPhase ==
+                        WorldVisitPhase.ManualConfirmation &&
+                    evt.AtkEvent != nint.Zero &&
+                    evt.AtkEventType.ToString() == "ButtonClick")
+                {
+                    var yesno =
+                        (AddonSelectYesno*)GetAddon("SelectYesno");
+
+                    if (yesno != null &&
+                        yesno->PromptText != null &&
+                        worldVisitTarget != null &&
+                        string.Equals(
+                            Clean(
+                                yesno->PromptText->NodeText.ToString()),
+                            "Travel to " +
+                                worldVisitTarget.Name + "?",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        var nativeEvent =
+                            (AtkEvent*)evt.AtkEvent;
+
+                        if (yesno->NoButton != null &&
+                            (nint)nativeEvent->Target ==
+                            (nint)yesno->NoButton->OwnerNode)
+                        {
+                            worldVisitManualDecision =
+                                WorldVisitManualDecision.Declined;
+                        }
+                        else if (yesno->YesButton != null &&
+                            (nint)nativeEvent->Target ==
+                            (nint)yesno->YesButton->OwnerNode)
+                        {
+                            worldVisitManualDecision =
+                                WorldVisitManualDecision.Accepted;
+                        }
+
+                        worldVisitNativeInputTrace.Add(
+                            DateTime.Now.ToString("HH:mm:ss.fff") +
+                            " | SelectYesno ButtonClick" +
+                            " | Param=" + evt.EventParam +
+                            " | Decision=" +
+                                worldVisitManualDecision);
+
+                        if (worldVisitNativeInputTrace.Count > 64)
+                            worldVisitNativeInputTrace.RemoveAt(0);
+                    }
+                }
+
+                return;
+            }
+
             var addon = GetAddon("WorldTravelSelect");
 
             if (addon == null)
@@ -543,7 +599,13 @@ public sealed unsafe partial class Plugin
         {
             if (WorldVisitCanStop())
             {
-                if (ImGui.SmallButton("Stop automation"))
+                string stopLabel =
+                    worldVisitPhase ==
+                        WorldVisitPhase.WaitForArrival
+                        ? "Stop monitoring"
+                        : "Stop automation";
+
+                if (ImGui.SmallButton(stopLabel))
                     TryStopWorldVisitFromUser();
             }
             else
@@ -565,7 +627,7 @@ public sealed unsafe partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "DEV6: Native DC/world selection; final confirmation manual.");
+            "DEV6 FIX2: Native selection; manual confirmation with decline tracking.");
     }
     private static void CollectWorldVisitNativeText(
         AtkUldManager* manager,
