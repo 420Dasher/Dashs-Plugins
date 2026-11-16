@@ -90,7 +90,7 @@
     "InternalName":  "AethernetAssist",
     "Name":  "AethernetAssist",
     "AssemblyVersion":  "3.0.0.0",
-    "TestingAssemblyVersion":  "3.0.7.0",
+    "TestingAssemblyVersion":  "3.0.8.0",
     "DalamudApiLevel":  15,
     "TestingDalamudApiLevel":  15,
     "ApplicableVersion":  "any",
@@ -103,7 +103,7 @@
     "IsTestingExclusive":  false,
     "Punchline":  "Map-based Aetheryte and Aethernet navigation.",
     "Description":  "Click supported Aetherytes or Aethernet shards on the map to travel automatically. AethernetAssist handles teleports and walking to nearby crystals when needed. It also provides a compact interface for city and residential Aethernet, housing ward travel, Cosmic Exploration, and same-data-center World Visit.",
-    "Changelog":  "Patch 7.58 DEV6 v3.0.7: Adds guarded Light/Chaos DC selection and validated native World Visit destination selection. Native travel confirmation remains manual during testing. Stable v3.0.0 unchanged.",
+    "Changelog":  "Patch 7.58 DEV6 FIX2 v3.0.8: Adds read-only native manual Yes/No decision observation, immediate decline reset when identified, a safe fallback after an unrecognized dialog close, and Stop monitoring before a transfer enters the native queue. Verified Light/Chaos world selection unchanged. Stable v3.0.0 unchanged.",
     "Tags":  [
                  "aethernet",
                  "aetheryte",
