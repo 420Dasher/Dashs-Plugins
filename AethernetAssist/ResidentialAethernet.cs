@@ -157,7 +157,7 @@ public sealed unsafe partial class Plugin
         Log.Warning("AethernetAssist Residential: " + message);
     }
 
-    private void StartResidentialTravel(ResidentialStop stop)
+    private void StartResidentialTravel(ResidentialStop stop, bool keepWindowOpen = false)
     {
         if (residentialPhase != ResidentialPhase.Idle ||
             phase != TravelPhase.Idle ||
@@ -190,7 +190,8 @@ public sealed unsafe partial class Plugin
 
         residentialStatus = "Opening " + stop.Name + "...";
         SetResidentialPhase(ResidentialPhase.Interact);
-        windowOpen = false;
+        if (!keepWindowOpen)
+            windowOpen = false;
     }
 
     private void TickResidentialTravel()
@@ -343,6 +344,12 @@ public sealed unsafe partial class Plugin
             return;
 
         var addon = GetAddon("TelepotTown");
+
+        // 750 ms minimum between residential callbacks.
+        // Re-read and validate the complete native entry after waiting.
+        if (residentialCallbackAttempts > 0 &&
+            (now - residentialLastAction).TotalMilliseconds < 750)
+            return;
 
         if (addon == null || addon->AtkValues == null)
             return;

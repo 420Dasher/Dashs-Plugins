@@ -742,7 +742,7 @@ public sealed unsafe partial class Plugin
         mapClickPreview =
             $"Residential Aethernet: {stop.Name} (ID {stop.Id})";
 
-        StartResidentialTravel(stop);
+        StartResidentialTravel(stop, keepWindowOpen: true);
 
         AppendMapClickRecord(
             residentialPhase == ResidentialPhase.Idle
