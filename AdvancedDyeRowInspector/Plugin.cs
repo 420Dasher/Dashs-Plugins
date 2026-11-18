@@ -35,17 +35,6 @@ public sealed partial class Plugin : IDalamudPlugin
     [PluginService]
     private static IPluginLog Log { get; set; } = null!;
 
-    [PluginService]
-    private static ITextureProvider Textures { get; set; } = null!;
-
-    [PluginService]
-    private static ITextureReadbackProvider Readback { get; set; } = null!;
-
-    [PluginService]
-    private static IFramework Framework { get; set; } = null!;
-
-    [PluginService]
-    private static IGameGui GameGui { get; set; } = null!;
 
     // Confirmed Penumbra API V5 signatures.
     private readonly ICallGateSubscriber<
@@ -192,9 +181,7 @@ public sealed partial class Plugin : IDalamudPlugin
         Pi.UiBuilder.OpenMainUi += Open;
         Pi.UiBuilder.OpenConfigUi += Open;
 
-        Framework.Update += OnLivePreviewFramework;
-
-        Log.Information("Advanced Dye Row Inspector DEV2 initialized.");
+        Log.Information("Advanced Dye Row Inspector DEV8 Stage 1 initialized.");
     }
 
     private void OnCommand(string command, string arguments)
@@ -209,12 +196,6 @@ public sealed partial class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
-        DisposeAutoRowScan();
-        DisposeControlledRowComparison();
-        DisposeScreenNoiseMeasurement();
-
-        Framework.Update -= OnLivePreviewFramework;
-        EndLivePreview("Plugin unloaded.");
 
         Commands.RemoveHandler("/adri");
         Pi.UiBuilder.Draw -= Draw;
@@ -759,9 +740,6 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void Scan()
     {
-        CancelAutoRowScan();
-        CancelControlledRowComparison();
-        EndLivePreview("Stopped by rescan.");
 
         scanned = true;
         scanTime = DateTime.Now;
@@ -870,8 +848,8 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector - DEV7 STAGE 7");
-        sb.AppendLine("Version: 0.0.3.19");
+        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 1");
+        sb.AppendLine("Version: 0.0.3.20");
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
         sb.AppendLine("Object index: " + actorIndex);
@@ -947,10 +925,7 @@ public sealed partial class Plugin : IDalamudPlugin
         AppendMaterialAuditDiagnostics(sb);
         AppendRuntimeMaterialDiagnostics(sb);
         AppendPreviewTargetDiagnostics(sb);
-        AppendLivePreviewDiagnostics(sb);
-        AppendScreenNoiseDiagnostics(sb);
-        AppendControlledRowDiagnostics(sb);
-        AppendAutoRowScanDiagnostics(sb);
+
         sb.AppendLine("[FLAT PENUMBRA RESOURCE SNAPSHOT]");
 
         foreach (var item in flat)

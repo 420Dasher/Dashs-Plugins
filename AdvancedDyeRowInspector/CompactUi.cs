@@ -169,90 +169,66 @@ public sealed partial class Plugin
                 "Partial UV analysis; see troubleshooting.");
         }
 
-        // The main scan controls appear once per slot,
-        // and only for an unambiguous single material.
-        if (index == 0)
-        {
-            DrawCompactAutoScan(
-                CompactModels(compactSlot));
-        }
-
         var ranked = RankedUvRows(report).ToArray();
 
         if (ranked.Length == 0)
         {
             ImGui.TextDisabled(
-                "No UV rows pass the sampling threshold.");
+                "No preliminary UV candidates found.");
             return;
         }
 
-        bool hasVisual = HasCompactAutoResults();
-        bool showUv = true;
+        ImGui.Spacing();
 
-        if (hasVisual)
+        ImGui.TextDisabled(
+            "Preliminary UV candidates (UNVERIFIED)");
+
+        ImGui.TextDisabled(
+            $"Sparse UV sampling: {report.Triangles:N0} " +
+            $"triangles, {report.Meshes} mesh(es)");
+
+        int shown = compactShowMoreRows
+            ? ranked.Length
+            : Math.Min(5, ranked.Length);
+
+        for (int i = 0; i < shown; i++)
         {
-            showUv = ImGui.TreeNode(
-                "UV-only sampling details##ADRICompactUV");
+            var row = ranked[i];
+
+            ImGui.TextUnformatted(row.Row);
+            ImGui.SameLine();
+
+            float width = Math.Min(
+                250f,
+                Math.Max(
+                    110f,
+                    ImGui.GetContentRegionAvail().X));
+
+            ImGui.ProgressBar(
+                Math.Clamp(
+                    (float)(row.Percent / 100.0),
+                    0f,
+                    1f),
+                new Vector2(width, 0f),
+                $"{row.Percent:F1}%");
         }
-        else
+
+        if (ranked.Length > 5)
         {
-            ImGui.Spacing();
-            ImGui.TextDisabled(
-                "UV candidates (not visually verified)");
-        }
+            string label = compactShowMoreRows
+                ? "Show fewer UV rows"
+                : $"Show {ranked.Length - 5} more UV rows";
 
-        if (showUv)
-        {
-            ImGui.TextDisabled(
-                $"UV sampling: {report.Triangles:N0} " +
-                $"triangles, {report.Meshes} mesh(es)");
-
-            int shown = compactShowMoreRows
-                ? ranked.Length
-                : Math.Min(5, ranked.Length);
-
-            for (int i = 0; i < shown; i++)
+            if (ImGui.SmallButton(
+                $"{label}##uvmore_{index}"))
             {
-                var row = ranked[i];
-
-                ImGui.TextUnformatted(row.Row);
-                ImGui.SameLine();
-
-                ImGui.ProgressBar(
-                    Math.Clamp(
-                        (float)(row.Percent / 100.0),
-                        0f,
-                        1f),
-                    new System.Numerics.Vector2(
-                        Math.Min(
-                            250f,
-                            Math.Max(
-                                110f,
-                                ImGui.GetContentRegionAvail().X)),
-                        0f),
-                    $"{row.Percent:F1}%");
+                compactShowMoreRows = !compactShowMoreRows;
             }
-
-            if (ranked.Length > 5)
-            {
-                string label = compactShowMoreRows
-                    ? "Show fewer UV rows"
-                    : $"Show {ranked.Length - 5} more UV rows";
-
-                if (ImGui.SmallButton(
-                    $"{label}##uvmore_{index}"))
-                {
-                    compactShowMoreRows = !compactShowMoreRows;
-                }
-            }
-
-            ImGui.TextDisabled(
-                "UV influence is not confirmed " +
-                "on-screen visibility.");
-
-            if (hasVisual)
-                ImGui.TreePop();
         }
+
+        ImGui.TextDisabled(
+            "Experimental UV samples, not confirmed " +
+            "active-mesh dye coverage.");
     }
 
     private void DrawCompactAdvanced(
@@ -323,10 +299,6 @@ public sealed partial class Plugin
 
             // Keep useful development tools available,
             // but remove their clutter from the main UI.
-            DrawScreenNoiseDiagnostics();
-
-            DrawControlledRowDiagnostics(
-                selectedModels);
 
             DrawMaterialAudit(selectedModels);
 
@@ -442,15 +414,11 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "v0.0.3.19  |  Experimental UV analysis");
+            "v0.0.3.20  |  Read-only UV groundwork");
 
         ImGui.Spacing();
 
-        if (autoRowScanRunning)
-        {
-            ImGui.TextDisabled("Checking dye rows...");
-        }
-        else if (ImGui.Button("Scan outfit"))
+        if (ImGui.Button("Scan outfit"))
         {
             Scan();
             compactShowMoreRows = false;
@@ -554,12 +522,7 @@ public sealed partial class Plugin
 
         ImGui.SetNextItemWidth(210f);
 
-        if (autoRowScanRunning)
-        {
-            ImGui.TextDisabled(
-                compactSlot + " (automatic scan running)");
-        }
-        else if (ImGui.BeginCombo(
+        if (ImGui.BeginCombo(
             "##ADRIEquipment", compactSlot))
         {
             foreach (string slot in availableSlots)

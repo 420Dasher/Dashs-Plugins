@@ -344,10 +344,10 @@ public sealed partial class Plugin
         List<ModelEntry> selectedModels)
     {
         ImGui.Separator();
-        ImGui.TextUnformatted("Live colorset preview readiness");
+        ImGui.TextUnformatted("Read-only loaded material targets");
 
         if (ImGui.SmallButton(
-            "Check preview targets##ADRITargets"))
+            "Check loaded targets##ADRITargets"))
         {
             ResolvePreviewTargets(materials, selectedModels);
         }
@@ -368,14 +368,14 @@ public sealed partial class Plugin
 
             ImGui.TextDisabled(
                 target.Compatible
-                    ? "Compatible with a Dawntrail colorset preview."
-                    : "Not currently a compatible preview target.");
+                    ? "Loaded Dawntrail colorset format recognized."
+                    : "Different or unavailable colorset format.");
 
             ImGui.Unindent();
         }
 
         ImGui.TextDisabled(
-            "Read-only validation. Does not modify live textures.");
+            "Read-only validation; no texture modifications.");
 
         ImGui.TextDisabled(
             "Native pointers are checked and discarded immediately.");

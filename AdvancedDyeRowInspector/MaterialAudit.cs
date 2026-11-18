@@ -548,8 +548,6 @@ public sealed partial class Plugin
 
         DrawPreviewTargetResolver(materials, selectedModels);
 
-        DrawLiveRowPreview(materials, selectedModels);
-
         ImGui.Spacing();
 
         ImGui.TextDisabled(
