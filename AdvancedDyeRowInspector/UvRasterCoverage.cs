@@ -67,11 +67,14 @@ public sealed partial class Plugin
                 !vertices[i2].HasValue)
             {
                 report.SkippedTriangles++;
+                report.InvalidUvTriangles++;
                 report.Capped = true;
                 if (report.Status.Length == 0)
                     report.Status = "Some triangles lack usable UV0 data.";
                 continue;
             }
+
+            int skippedBefore = report.SkippedTriangles;
 
             RasterizeTriangle(
                 vertices[i0]!.Value,
@@ -80,8 +83,15 @@ public sealed partial class Plugin
                 tex,
                 report);
 
-            report.Triangles++;
-            uvTriangles++;
+            // Zero-area, unsafe, or budget-interrupted
+            // triangles do not count as fully rasterized.
+            if (report.SkippedTriangles == skippedBefore &&
+                !uvRasterBudgetExceeded &&
+                !uvModelRasterBudgetExceeded)
+            {
+                report.Triangles++;
+                uvTriangles++;
+            }
 
             if (uvRasterBudgetExceeded ||
                 uvModelRasterBudgetExceeded)
@@ -138,6 +148,7 @@ public sealed partial class Plugin
             maxY - minY > 4 * UvMaskSize)
         {
             report.SkippedTriangles++;
+            report.UnsafeUvTriangles++;
             report.Capped = true;
             report.Status =
                 "Some UV triangles exceed the safe tiling range.";
@@ -151,6 +162,7 @@ public sealed partial class Plugin
         if (Math.Abs(area) <= 1e-8)
         {
             report.SkippedTriangles++;
+            report.DegenerateTriangles++;
             return;
         }
 

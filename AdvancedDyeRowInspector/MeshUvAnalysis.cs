@@ -22,6 +22,9 @@ public sealed partial class Plugin
         public int Meshes;
         public int Triangles;
         public int SkippedTriangles;
+        public int DegenerateTriangles;
+        public int InvalidUvTriangles;
+        public int UnsafeUvTriangles;
         public int Samples;
         public int CleanSamples;
         public int OffGridSamples;
@@ -989,6 +992,14 @@ public sealed partial class Plugin
             $"off-grid {report.OffGridSamples}, " +
             $"skipped triangles {report.SkippedTriangles}");
 
+        if (report.SkippedTriangles > 0)
+        {
+            ImGui.TextDisabled(
+                $"Skipped UV triangles: zero-area {report.DegenerateTriangles}, " +
+                $"invalid UV/index {report.InvalidUvTriangles}, " +
+                $"unsafe range {report.UnsafeUvTriangles}.");
+        }
+
         if (report.Capped ||
             uvIncompleteMaterials.Contains(material))
         {
@@ -1150,6 +1161,9 @@ public sealed partial class Plugin
                 $"clean={r.CleanSamples} " +
                 $"offgrid={r.OffGridSamples} " +
                 $"skipped={r.SkippedTriangles} " +
+                $"degenerate={r.DegenerateTriangles} " +
+                $"invalidUv={r.InvalidUvTriangles} " +
+                $"unsafeUv={r.UnsafeUvTriangles} " +
                 $"capped={r.Capped} " +
                 $"incomplete={r.Capped || uvIncompleteMaterials.Contains(entry.Key)} " +
                 $"binding={binding} " +

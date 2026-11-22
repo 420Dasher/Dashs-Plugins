@@ -232,7 +232,7 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         return Regex.IsMatch(
             game + "|" + actual,
-            @"(?:_id|_index)\.tex(?:$|\|)",
+            @"(?:_id|_index)(?:_[0-9]+)?\.tex(?:$|\|)",
             RegexOptions.IgnoreCase);
     }
 
@@ -848,7 +848,7 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 2D");
+        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 2E");
         sb.AppendLine("Version: " + PluginBuildVersion);
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
