@@ -188,6 +188,7 @@ public sealed partial class Plugin
     }
 
     private readonly Queue<ModelEntry> pendingUvModels = new();
+    private readonly HashSet<MaterialEntry> uvIncompleteMaterials = new();
 
     private readonly Dictionary<string, TexturePixels> uvPixelCache =
         new(StringComparer.OrdinalIgnoreCase);
@@ -310,6 +311,8 @@ public sealed partial class Plugin
         meshIssues.Clear();
         pendingUvModels.Clear();
         uvPixelCache.Clear();
+        uvIncompleteMaterials.Clear();
+        ResetStructureAudit();
 
         uvCacheBytes = 0;
         uvMatchedModels = 0;
@@ -374,6 +377,10 @@ public sealed partial class Plugin
                 return;
             }
 
+            // Structural audit runs before UV budget checks.
+            // It describes model data, not runtime visibility.
+            AuditGeometryModel(model, mdl, first, end);
+
             int linked = 0;
             int skipped = 0;
 
@@ -389,13 +396,22 @@ public sealed partial class Plugin
                     if (uvTriangles >= 60000)
                         uvTriangleLimitReached = true;
 
-                    MarkUvReportsPartial();
+                    string reason = uvRasterBudgetExceeded
+                        ? "Global UV raster work budget exhausted"
+                        : "Global 60,000 triangle limit reached";
 
-                    failures.Add(
-                        uvRasterBudgetExceeded
-                            ? "UV raster work budget exhausted"
-                            : "Global 60,000 triangle limit reached");
-                    break;
+                    RecordCappedMesh(
+                        model, mdl, meshIndex, reason);
+
+                    skipped++;
+                    uvUnmatchedMeshes++;
+
+                    if (failures.Count < 5)
+                        failures.Add($"Mesh {meshIndex}: {reason}");
+
+                    // Keep accounting for remaining meshes.
+                    // Do not spend more UV raster budget.
+                    continue;
                 }
 
                 RawUvMesh raw;
@@ -406,6 +422,8 @@ public sealed partial class Plugin
                 }
                 catch (Exception ex)
                 {
+                    MarkMaterialIncomplete(model, mdl, meshIndex);
+
                     RecordMeshIssue(
                         model,
                         meshIndex,
@@ -435,6 +453,8 @@ public sealed partial class Plugin
 
                 if (matches.Count != 1)
                 {
+                    MarkMaterialIncomplete(model, mdl, meshIndex);
+
                     var linkedByName = model.Materials
                         .Where(m => string.Equals(
                             BaseName(m.GamePath),
@@ -510,6 +530,8 @@ public sealed partial class Plugin
 
                 if (ids.Count != 1)
                 {
+                    uvIncompleteMaterials.Add(material);
+
                     RecordMeshIssue(
                         model,
                         meshIndex,
@@ -554,14 +576,35 @@ public sealed partial class Plugin
                         uvPixelCache,
                         ref uvCacheBytes);
 
-                    RasterizeMesh(raw, pixels, report);
+                    bool complete =
+                        RasterizeMesh(raw, pixels, report);
 
-                    linked++;
-                    report.Meshes++;
-                    uvMatchedMeshes++;
+                    if (complete)
+                    {
+                        linked++;
+                        report.Meshes++;
+                        uvMatchedMeshes++;
+                    }
+                    else
+                    {
+                        uvIncompleteMaterials.Add(material);
+                        skipped++;
+                        uvUnmatchedMeshes++;
+
+                        RecordMeshIssue(
+                            model,
+                            meshIndex,
+                            "Partial UV rasterization",
+                            raw.MaterialName,
+                            report.Status.Length > 0
+                                ? report.Status
+                                : "Global scan budget interrupted this mesh.");
+                    }
                 }
                 catch (Exception ex)
                 {
+                    uvIncompleteMaterials.Add(material);
+                    report.Capped = true;
                     report.Status = ex.Message;
 
                     RecordMeshIssue(
@@ -880,8 +923,11 @@ public sealed partial class Plugin
             material, out var report))
         {
             ImGui.TextDisabled(
-                "UV: not sampled " +
-                "(mesh/material could not be uniquely matched).");
+                uvIncompleteMaterials.Contains(material)
+                    ? "UV: incomplete; one or more linked meshes " +
+                      "could not be sampled."
+                    : "UV: not sampled " +
+                      "(mesh/material could not be uniquely matched).");
             return;
         }
 
@@ -902,10 +948,12 @@ public sealed partial class Plugin
             $"off-grid {report.OffGridSamples}, " +
             $"skipped triangles {report.SkippedTriangles}");
 
-        if (report.Capped)
+        if (report.Capped ||
+            uvIncompleteMaterials.Contains(material))
         {
             ImGui.TextDisabled(
-                "PARTIAL: global triangle safety limit reached.");
+                "PARTIAL: UV coverage is incomplete. " +
+                "See mesh and budget diagnostics.");
         }
 
         if (!string.IsNullOrWhiteSpace(report.Status))
@@ -1006,6 +1054,7 @@ public sealed partial class Plugin
             "Triangle limit reached: " +
             uvTriangleLimitReached);
         AppendMeshIssueDiagnostics(sb);
+        AppendStructureAudit(sb);
 
         sb.AppendLine(
             $"Models: {uvMatchedModels}, " +
@@ -1033,6 +1082,7 @@ public sealed partial class Plugin
                 $"offgrid={r.OffGridSamples} " +
                 $"skipped={r.SkippedTriangles} " +
                 $"capped={r.Capped} " +
+                $"incomplete={r.Capped || uvIncompleteMaterials.Contains(entry.Key)} " +
                 $"status={r.Status}");
 
             if (r.CleanSamples > 0)

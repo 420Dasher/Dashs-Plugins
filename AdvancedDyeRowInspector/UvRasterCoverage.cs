@@ -23,13 +23,8 @@ public sealed partial class Plugin
         uvTriangleLimitReached = false;
     }
 
-    private void MarkUvReportsPartial()
-    {
-        foreach (var report in uvReports.Values)
-            report.Capped = true;
-    }
 
-    private void RasterizeMesh(
+    private bool RasterizeMesh(
         RawUvMesh mesh,
         TexturePixels tex,
         UvReport report)
@@ -42,14 +37,16 @@ public sealed partial class Plugin
             if (uvTriangles >= 60000)
             {
                 uvTriangleLimitReached = true;
-                MarkUvReportsPartial();
-                return;
+                report.Capped = true;
+                report.Status = "Global triangle budget reached.";
+                return false;
             }
 
             if (uvRasterBudgetExceeded)
             {
-                MarkUvReportsPartial();
-                return;
+                report.Capped = true;
+                report.Status = "Global raster budget exhausted.";
+                return false;
             }
 
             int i0 = indices[n];
@@ -64,6 +61,9 @@ public sealed partial class Plugin
                 !vertices[i2].HasValue)
             {
                 report.SkippedTriangles++;
+                report.Capped = true;
+                if (report.Status.Length == 0)
+                    report.Status = "Some triangles lack usable UV0 data.";
                 continue;
             }
 
@@ -79,10 +79,12 @@ public sealed partial class Plugin
 
             if (uvRasterBudgetExceeded)
             {
-                MarkUvReportsPartial();
-                return;
+                report.Capped = true;
+                return false;
             }
         }
+
+        return true;
     }
 
     private void RasterizeTriangle(
