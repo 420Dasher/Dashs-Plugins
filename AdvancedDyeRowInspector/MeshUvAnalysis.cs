@@ -29,6 +29,11 @@ public sealed partial class Plugin
 
         public readonly double[] Weights = new double[32];
 
+        // Unique occupied cells for this material.
+        // Never count an overlapping UV cell twice.
+        public readonly byte[] Mask =
+            new byte[UvMaskSize * UvMaskSize];
+
 
     }
 
@@ -53,16 +58,7 @@ public sealed partial class Plugin
     private int uvUnmatchedMeshes;
     private int uvTriangles;
 
-    private static readonly Vector3[] BarycentricSamples =
-    {
-        new(1f/3f, 1f/3f, 1f/3f),
-        new(0.8f, 0.1f, 0.1f),
-        new(0.1f, 0.8f, 0.1f),
-        new(0.1f, 0.1f, 0.8f),
-        new(0.45f, 0.45f, 0.1f),
-        new(0.1f, 0.45f, 0.45f),
-        new(0.45f, 0.1f, 0.45f),
-    };
+
 
     private static string BaseName(string path)
     {
@@ -321,6 +317,7 @@ public sealed partial class Plugin
         uvUnmatchedMeshes = 0;
         uvTriangles = 0;
         uvProcessedModels = 0;
+        ResetRasterCounters();
 
         foreach (var model in models.Where(x => x.IsOutfit))
             pendingUvModels.Enqueue(model);
@@ -386,10 +383,18 @@ public sealed partial class Plugin
                  meshIndex < end;
                  meshIndex++)
             {
-                if (uvTriangles >= 60000)
+                if (uvTriangles >= 60000 ||
+                    uvRasterBudgetExceeded)
                 {
+                    if (uvTriangles >= 60000)
+                        uvTriangleLimitReached = true;
+
+                    MarkUvReportsPartial();
+
                     failures.Add(
-                        "Global 60,000 triangle limit reached");
+                        uvRasterBudgetExceeded
+                            ? "UV raster work budget exhausted"
+                            : "Global 60,000 triangle limit reached");
                     break;
                 }
 
@@ -549,7 +554,7 @@ public sealed partial class Plugin
                         uvPixelCache,
                         ref uvCacheBytes);
 
-                    SampleMesh(raw, pixels, report);
+                    RasterizeMesh(raw, pixels, report);
 
                     linked++;
                     report.Meshes++;
@@ -833,111 +838,7 @@ public sealed partial class Plugin
         return result;
     }
 
-    private void SampleMesh(
-        RawUvMesh mesh,
-        TexturePixels tex,
-        UvReport report)
-    {
-        var indices = mesh.Indices;
-        var vertices = mesh.Uvs;
 
-        for (int n = 0; n + 2 < indices.Length; n += 3)
-        {
-            if (uvTriangles >= 60000)
-            {
-                report.Capped = true;
-                return;
-            }
-
-            int i0 = indices[n];
-            int i1 = indices[n + 1];
-            int i2 = indices[n + 2];
-
-            if (i0 >= vertices.Length ||
-                i1 >= vertices.Length ||
-                i2 >= vertices.Length ||
-                !vertices[i0].HasValue ||
-                !vertices[i1].HasValue ||
-                !vertices[i2].HasValue)
-            {
-                report.SkippedTriangles++;
-                continue;
-            }
-
-            Vector2 a = vertices[i0]!.Value;
-            Vector2 b = vertices[i1]!.Value;
-            Vector2 c = vertices[i2]!.Value;
-
-
-            foreach (var w in BarycentricSamples)
-            {
-                float u =
-                    a.X * w.X +
-                    b.X * w.Y +
-                    c.X * w.Z;
-
-                float v =
-                    a.Y * w.X +
-                    b.Y * w.Y +
-                    c.Y * w.Z;
-
-                SampleUv(u, v, tex, report);
-            }
-
-            report.Triangles++;
-            uvTriangles++;
-        }
-    }
-
-    private void SampleUv(
-        float u,
-        float v,
-        TexturePixels tex,
-        UvReport report)
-    {
-        // Experimental UV0 XY sampling.
-        // Uses repeating address mode and point sampling.
-        // The actual shader mapping remains to be validated.
-
-        double x = u - Math.Floor(u);
-        double y = v - Math.Floor(v);
-
-        if (flipUvV)
-            y = 1.0 - y;
-
-        int px = Math.Clamp(
-            (int)(x * tex.Width),
-            0,
-            tex.Width - 1);
-
-        int py = Math.Clamp(
-            (int)(y * tex.Height),
-            0,
-            tex.Height - 1);
-
-        int offset = (py * tex.Width + px) * 4;
-
-        byte red = tex.Bgra[offset + 2];
-        byte green = tex.Bgra[offset + 1];
-
-        report.Samples++;
-
-        int pair = Math.Clamp((red + 8) / 17, 0, 15);
-
-        if (Math.Abs(red - pair * 17) > 3)
-        {
-            report.OffGridSamples++;
-            return;
-        }
-
-        report.CleanSamples++;
-
-        report.Weights[pair * 2] += green / 255.0;
-        report.Weights[pair * 2 + 1] +=
-            (255 - green) / 255.0;
-
-
-    }
 
     private IEnumerable<(string Row, double Percent)>
         RankedUvRows(UvReport report)
@@ -985,8 +886,15 @@ public sealed partial class Plugin
         }
 
         ImGui.TextUnformatted(
-            $"UV0 sampled: {report.Triangles} triangles, " +
-            $"{report.Samples} samples");
+            $"UV0 rasterized: {report.Triangles} triangles");
+
+        ImGui.TextDisabled(
+            $"256x256 mask: {report.Samples:N0} unique " +
+            $"covered cells / {UvMaskSize * UvMaskSize:N0}");
+
+        ImGui.TextDisabled(
+            $"Raster checks: {uvRasterChecks:N0} / " +
+            $"{MaxUvRasterChecks:N0} global budget");
 
         ImGui.TextDisabled(
             $"ID: {BaseName(report.Texture)}; " +
@@ -1040,8 +948,12 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "Experimental UV0 sampling, 7 points/triangle; " +
-            "not actual on-screen visibility.");
+            "Experimental UV0 coverage mask. ID texture " +
+            "selection is not yet shader-verified.");
+
+        ImGui.TextDisabled(
+            "Active shapes, attributes and rendered " +
+            "visibility are not yet verified.");
     }
 
     private void DrawUvControls()
@@ -1050,7 +962,7 @@ public sealed partial class Plugin
             $"Geometry scan: {uvProcessedModels}/{uvTotalModels} models processed; " +
             $"{pendingUvModels.Count} pending.");
         ImGui.TextDisabled(
-            "DEV3: experimental mesh UV0 sampling " +
+            "DEV8: experimental 256x256 UV coverage " +
             "(rescan after UV changes).");
 
         ImGui.Checkbox(
@@ -1076,14 +988,23 @@ public sealed partial class Plugin
 
     private void AppendUvDiagnostics(StringBuilder sb)
     {
-        sb.AppendLine("[EXPERIMENTAL MESH UV REPORT]");
+        sb.AppendLine("[EXPERIMENTAL UV COVERAGE MASK REPORT]");
 
         sb.AppendLine(
             "Mode: UV0/XY, repeating UV, " +
-            "7 samples per triangle; " +
-            "NOT visible-geometry proof");
+            "256x256 triangle coverage mask, unique " +
+            "occupied cells per material; " +
+            "NOT active-shape or rendered-visibility proof");
 
         sb.AppendLine("Flip V: " + flipUvV);
+        sb.AppendLine(
+            $"Raster checks: {uvRasterChecks}/{MaxUvRasterChecks}");
+        sb.AppendLine(
+            "Raster work budget exceeded: " +
+            uvRasterBudgetExceeded);
+        sb.AppendLine(
+            "Triangle limit reached: " +
+            uvTriangleLimitReached);
         AppendMeshIssueDiagnostics(sb);
 
         sb.AppendLine(
@@ -1107,7 +1028,7 @@ public sealed partial class Plugin
                 $"ID {r.Texture}: " +
                 $"meshes={r.Meshes} " +
                 $"triangles={r.Triangles} " +
-                $"samples={r.Samples} " +
+                $"coveredCells={r.Samples} " +
                 $"clean={r.CleanSamples} " +
                 $"offgrid={r.OffGridSamples} " +
                 $"skipped={r.SkippedTriangles} " +

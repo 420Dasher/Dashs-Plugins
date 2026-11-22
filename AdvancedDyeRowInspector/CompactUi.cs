@@ -204,7 +204,7 @@ public sealed partial class Plugin
                 $"{uvUnmatchedMeshes} unmatched");
 
             ImGui.TextDisabled(
-                $"Triangles sampled: {uvTriangles:N0}");
+                $"Triangles rasterized: {uvTriangles:N0}");
 
             DrawMeshIssueDiagnostics();
 
@@ -212,7 +212,7 @@ public sealed partial class Plugin
                 "Experimental UV sampling (developer only)"))
             {
                 ImGui.TextDisabled(
-                    "Seven-point triangle samples only; " +
+                    "256x256 UV mask coverage only; " +
                     "not verified dye-row coverage.");
 
                 foreach (var material in
@@ -409,7 +409,7 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "v0.0.3.22  |  Material source diagnostics");
+            "v0.0.3.23  |  UV coverage-mask analysis");
 
         ImGui.Spacing();
 
