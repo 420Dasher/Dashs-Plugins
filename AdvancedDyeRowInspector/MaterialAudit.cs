@@ -30,6 +30,16 @@ public sealed partial class Plugin
         public bool IndexDeclared;
         public bool TreePathMatched;
         public bool ReadSucceeded;
+
+        public int DeclaredTextureCount;
+        public int ExplicitSamplerCount;
+        public int ResolvedDeclaredTextures;
+        public int IdNamedDeclaredTextures;
+
+        public string SourceStatus = "";
+
+        public readonly List<string>
+            TextureDeclarations = new();
     }
 
     private readonly Dictionary<MaterialEntry, MaterialAudit>
@@ -92,6 +102,97 @@ public sealed partial class Plugin
             0x2B99E025u   => "Specular",
             _             => "Unknown"
         };
+    }
+
+    private void InspectDeclaredTexturePaths(
+        MtrlFile mtrl,
+        MaterialEntry material,
+        MaterialAudit audit)
+    {
+        audit.DeclaredTextureCount =
+            mtrl.TextureOffsets.Length;
+
+        audit.ExplicitSamplerCount =
+            mtrl.Samplers.Length;
+
+        // Limit displayed declarations to protect
+        // the UI from malformed material resources.
+        int count = Math.Min(
+            audit.DeclaredTextureCount, 64);
+
+        for (int i = 0; i < count; i++)
+        {
+            string declared;
+
+            try
+            {
+                declared = AuditString(
+                    mtrl.Strings,
+                    mtrl.TextureOffsets[i].Offset);
+            }
+            catch (Exception ex)
+            {
+                audit.TextureDeclarations.Add(
+                    $"[{i}] Invalid declaration: " +
+                    ex.GetType().Name);
+                continue;
+            }
+
+            bool idNamed = IsIdTexture(
+                declared, declared);
+
+            if (idNamed)
+                audit.IdNamedDeclaredTextures++;
+
+            var links = material.Textures
+                .Where(t =>
+                    !string.IsNullOrWhiteSpace(t.GamePath) &&
+                    string.Equals(
+                        AuditPath(t.GamePath),
+                        AuditPath(declared),
+                        StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+
+            var resolved = links
+                .Select(t => AuditPath(t.ActualPath))
+                .Where(p => p.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            string state;
+
+            if (links.Length == 0)
+            {
+                state = "not linked in resource tree";
+            }
+            else if (resolved.Length == 1)
+            {
+                audit.ResolvedDeclaredTextures++;
+                state = "one Penumbra-resolved source";
+            }
+            else if (resolved.Length > 1)
+            {
+                state = "ambiguous resolved sources";
+            }
+            else
+            {
+                state = "linked; resolution unavailable";
+            }
+
+            string type = idNamed
+                ? "ID-named candidate (unverified)"
+                : "Declared texture";
+
+            audit.TextureDeclarations.Add(
+                $"[{i}] {type}: {declared} | {state}");
+        }
+
+        if (audit.DeclaredTextureCount > count)
+        {
+            audit.TextureDeclarations.Add(
+                "Remaining declarations omitted by " +
+                "the diagnostic safety limit.");
+        }
     }
 
     // Diagnostic candidate logic only.
@@ -290,6 +391,9 @@ public sealed partial class Plugin
                 mtrl.Strings,
                 mtrl.FileHeader.ShaderPackageNameOffset);
 
+            InspectDeclaredTexturePaths(
+                mtrl, material, audit);
+
             InspectSamplerBindings(mtrl, material, audit);
 
             var samplers = mtrl.Samplers
@@ -301,9 +405,22 @@ public sealed partial class Plugin
                 audit.Status =
                     "No explicit index sampler declared.";
 
+                audit.SourceStatus =
+                    "Row source unresolved: no index sampler " +
+                    "is explicitly declared in the MTRL.";
+
+                if (mtrl.Samplers.Any(
+                    s => s.SamplerId == NormalSamplerId))
+                {
+                    audit.SourceStatus =
+                        "Normal sampler declared without index " +
+                        "sampler. Legacy mapping remains unverified.";
+                }
+
                 audit.Evidence =
-                    "Any normal-map-derived ID candidate is " +
-                    "diagnostic only, not confirmed shader usage.";
+                    "Missing explicit samplers does not imply " +
+                    "missing loaded textures. See declarations " +
+                    "and runtime resource associations.";
 
                 return audit;
             }
@@ -313,6 +430,10 @@ public sealed partial class Plugin
                 audit.Status =
                     "Multiple index sampler declarations.";
 
+                audit.SourceStatus =
+                    "Ambiguous index sampler declarations. " +
+                    "No dye-row source selected.";
+
                 audit.Evidence =
                     "Sampler binding is ambiguous.";
 
@@ -320,6 +441,10 @@ public sealed partial class Plugin
             }
 
             audit.IndexDeclared = true;
+
+            audit.SourceStatus =
+                "Index sampler declared; resource-path " +
+                "verification required.";
 
             int textureIndex = samplers[0].TextureIndex;
 
@@ -368,6 +493,11 @@ public sealed partial class Plugin
                 audit.TreePathMatched = true;
                 audit.Status =
                     "Index sampler path matches Penumbra's resource tree.";
+
+                audit.SourceStatus =
+                    "Index sampler and unique Penumbra-resolved " +
+                    "resource path agree. Texture source identified; " +
+                    "active-mesh coverage remains unverified.";
 
                 audit.Evidence =
                     "Resolved texture: " +
@@ -501,6 +631,28 @@ public sealed partial class Plugin
 
                 ImGui.TextDisabled(
                     $"Color dataset: {audit.DatasetBytes} bytes");
+
+                ImGui.TextDisabled(
+                    $"MTRL: {audit.DeclaredTextureCount} " +
+                    $"textures, {audit.ExplicitSamplerCount} " +
+                    "explicit samplers");
+
+                ImGui.TextWrapped(
+                    audit.SourceStatus);
+
+                if (ImGui.TreeNode(
+                    $"Declared textures " +
+                    $"({audit.DeclaredTextureCount})" +
+                    $"##adri_decl_{material.GetHashCode()}"))
+                {
+                    foreach (string declaration in
+                        audit.TextureDeclarations)
+                    {
+                        ImGui.TextWrapped(declaration);
+                    }
+
+                    ImGui.TreePop();
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(
@@ -599,6 +751,33 @@ public sealed partial class Plugin
             sb.AppendLine(
                 "DATASET BYTES: " +
                 entry.Value.DatasetBytes);
+
+            sb.AppendLine(
+                "MTRL TEXTURE DECLARATIONS: " +
+                entry.Value.DeclaredTextureCount);
+
+            sb.AppendLine(
+                "MTRL EXPLICIT SAMPLERS: " +
+                entry.Value.ExplicitSamplerCount);
+
+            sb.AppendLine(
+                "PENUMBRA-RESOLVED DECLARED TEXTURES: " +
+                entry.Value.ResolvedDeclaredTextures);
+
+            sb.AppendLine(
+                "ID-NAMED DECLARED CANDIDATES: " +
+                entry.Value.IdNamedDeclaredTextures);
+
+            sb.AppendLine(
+                "SOURCE ASSESSMENT: " +
+                entry.Value.SourceStatus);
+
+            foreach (string declaration in
+                entry.Value.TextureDeclarations)
+            {
+                sb.AppendLine(
+                    "DECLARED TEXTURE: " + declaration);
+            }
 
             sb.AppendLine(
                 "NORMAL MAP: " + entry.Value.NormalTexture);

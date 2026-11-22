@@ -12,7 +12,7 @@ public sealed partial class Plugin
 {
     private string compactSlot = "Body";
     private bool compactAdvanced;
-    private bool compactShowMoreRows;
+    private bool compactInitialWidthChecked;
 
 
     // Use the actual Dalamud theme.
@@ -36,20 +36,7 @@ public sealed partial class Plugin
             .ToList();
     }
 
-    private string[] CompactRows(string slot)
-    {
-        if (pendingUvModels.Count > 0)
-            return Array.Empty<string>();
 
-        return CompactMaterials(slot)
-            .Where(m => uvReports.TryGetValue(
-                m, out var r) && r.CleanSamples > 0)
-            .SelectMany(m => RankedUvRows(uvReports[m]))
-            .Select(r => r.Row)
-            .Distinct()
-            .OrderBy(RowOrder)
-            .ToArray();
-    }
 
     private static string FriendlyMaterialName(string gamePath)
     {
@@ -149,86 +136,10 @@ public sealed partial class Plugin
         }
 
         if (compactAdvanced && showPaths)
-            ImGui.TextDisabled(material.GamePath);
-
-        if (!uvReports.TryGetValue(
-            material, out var report) ||
-            report.CleanSamples <= 0 ||
-            report.Triangles <= 0)
-        {
-            ImGui.TextDisabled(
-                "UV analysis unavailable for this material.");
-
-            return;
-        }
-
-        if (report.Capped ||
-            !string.IsNullOrWhiteSpace(report.Status))
-        {
-            ImGui.TextDisabled(
-                "Partial UV analysis; see troubleshooting.");
-        }
-
-        var ranked = RankedUvRows(report).ToArray();
-
-        if (ranked.Length == 0)
-        {
-            ImGui.TextDisabled(
-                "No preliminary UV candidates found.");
-            return;
-        }
-
-        ImGui.Spacing();
+            ImGui.TextWrapped(material.GamePath);
 
         ImGui.TextDisabled(
-            "Preliminary UV candidates (UNVERIFIED)");
-
-        ImGui.TextDisabled(
-            $"Sparse UV sampling: {report.Triangles:N0} " +
-            $"triangles, {report.Meshes} mesh(es)");
-
-        int shown = compactShowMoreRows
-            ? ranked.Length
-            : Math.Min(5, ranked.Length);
-
-        for (int i = 0; i < shown; i++)
-        {
-            var row = ranked[i];
-
-            ImGui.TextUnformatted(row.Row);
-            ImGui.SameLine();
-
-            float width = Math.Min(
-                250f,
-                Math.Max(
-                    110f,
-                    ImGui.GetContentRegionAvail().X));
-
-            ImGui.ProgressBar(
-                Math.Clamp(
-                    (float)(row.Percent / 100.0),
-                    0f,
-                    1f),
-                new Vector2(width, 0f),
-                $"{row.Percent:F1}%");
-        }
-
-        if (ranked.Length > 5)
-        {
-            string label = compactShowMoreRows
-                ? "Show fewer UV rows"
-                : $"Show {ranked.Length - 5} more UV rows";
-
-            if (ImGui.SmallButton(
-                $"{label}##uvmore_{index}"))
-            {
-                compactShowMoreRows = !compactShowMoreRows;
-            }
-        }
-
-        ImGui.TextDisabled(
-            "Experimental UV samples, not confirmed " +
-            "active-mesh dye coverage.");
+            "Dye rows: not yet verified.");
     }
 
     private void DrawCompactAdvanced(
@@ -297,8 +208,26 @@ public sealed partial class Plugin
 
             DrawMeshIssueDiagnostics();
 
-            // Keep useful development tools available,
-            // but remove their clutter from the main UI.
+            if (ImGui.TreeNode(
+                "Experimental UV sampling (developer only)"))
+            {
+                ImGui.TextDisabled(
+                    "Seven-point triangle samples only; " +
+                    "not verified dye-row coverage.");
+
+                foreach (var material in
+                    CompactMaterials(compactSlot))
+                {
+                    ImGui.Separator();
+
+                    ImGui.TextUnformatted(
+                        FriendlyMaterialName(material.GamePath));
+
+                    DrawUvReport(material);
+                }
+
+                ImGui.TreePop();
+            }
 
             DrawMaterialAudit(selectedModels);
 
@@ -343,42 +272,58 @@ public sealed partial class Plugin
         }
     }
 
-    private static void FitCompactWindow(float requiredHeight)
+    private static float PreferredCompactWidth(
+        float screenWidth)
+    {
+        float available = MathF.Max(
+            240f, screenWidth - 32f);
+
+        float preferred = Math.Clamp(
+            screenWidth * 0.48f,
+            620f,
+            960f);
+
+        return MathF.Min(
+            preferred, available);
+    }
+
+    private static void FitCompactWindow(
+        float requiredHeight)
     {
         var display = ImGui.GetIO().DisplaySize;
 
-        float width = MathF.Min(
-            520f,
-            MathF.Max(200f, display.X - 24f));
+        float width =
+            PreferredCompactWidth(display.X);
 
         float maxHeight = MathF.Max(
-            220f,
-            display.Y - 48f);
+            220f, display.Y - 48f);
 
         float height = MathF.Min(
-            MathF.Max(requiredHeight + 12f, 235f),
+            MathF.Max(
+                requiredHeight + 12f, 280f),
             maxHeight);
 
         ImGui.SetWindowSize(
             new Vector2(width, height),
             ImGuiCond.Always);
 
-        // Keep the resized window within the display.
         var position = ImGui.GetWindowPos();
 
-        float maxX = MathF.Max(4f, display.X - width - 4f);
-        float maxY = MathF.Max(4f, display.Y - height - 4f);
+        float maxX = MathF.Max(
+            4f, display.X - width - 4f);
 
-        float x = Math.Clamp(position.X, 4f, maxX);
-        float y = Math.Clamp(position.Y, 4f, maxY);
+        float maxY = MathF.Max(
+            4f, display.Y - height - 4f);
 
-        if (x != position.X || y != position.Y)
-        {
-            ImGui.SetWindowPos(
-                new Vector2(x, y),
-                ImGuiCond.Always);
-        }
+        ImGui.SetWindowPos(
+            new Vector2(
+                Math.Clamp(
+                    position.X, 4f, maxX),
+                Math.Clamp(
+                    position.Y, 4f, maxY)),
+            ImGuiCond.Always);
     }
+
     private void DrawCompact()
     {
         if (!windowOpen)
@@ -387,8 +332,15 @@ public sealed partial class Plugin
         // Keep the existing incremental geometry workflow.
         ProcessGeometryStep();
 
+        var display = ImGui.GetIO().DisplaySize;
+
         ImGui.SetNextWindowSize(
-            new Vector2(520f, 420f),
+            new Vector2(
+                PreferredCompactWidth(display.X),
+                MathF.Min(
+                    560f,
+                    MathF.Max(
+                        300f, display.Y - 64f))),
             ImGuiCond.FirstUseEver);
 
         bool open = windowOpen;
@@ -406,6 +358,46 @@ public sealed partial class Plugin
 
         windowOpen = open;
 
+        // Migrate the former saved 520px width once.
+        // Subsequent user resizing stays untouched.
+        if (visible && !compactInitialWidthChecked)
+        {
+            compactInitialWidthChecked = true;
+
+            var current = ImGui.GetWindowSize();
+
+            if (display.X > 1000f &&
+                current.X >= 500f &&
+                current.X <= 550f)
+            {
+                float width =
+                    PreferredCompactWidth(display.X);
+
+                float height = MathF.Min(
+                    MathF.Max(current.Y, 440f),
+                    MathF.Max(
+                        220f, display.Y - 48f));
+
+                ImGui.SetWindowSize(
+                    new Vector2(width, height),
+                    ImGuiCond.Always);
+
+                var pos = ImGui.GetWindowPos();
+
+                ImGui.SetWindowPos(
+                    new Vector2(
+                        Math.Clamp(
+                            pos.X, 4f,
+                            MathF.Max(
+                                4f, display.X - width - 4f)),
+                        Math.Clamp(
+                            pos.Y, 4f,
+                            MathF.Max(
+                                4f, display.Y - height - 4f))),
+                    ImGuiCond.Always);
+            }
+        }
+
         if (!visible)
         {
             ImGui.End();
@@ -414,30 +406,18 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "v0.0.3.20  |  Read-only UV groundwork");
+            "v0.0.3.21  |  Material source diagnostics");
 
         ImGui.Spacing();
 
         if (ImGui.Button("Scan outfit"))
         {
             Scan();
-            compactShowMoreRows = false;
         }
 
         ImGui.SameLine();
 
-        var selectedRows = CompactRows(compactSlot);
 
-        if (selectedRows.Length > 0)
-        {
-            if (ImGui.Button("Copy UV rows"))
-            {
-                ImGui.SetClipboardText(
-                    string.Join(", ", selectedRows));
-            }
-
-            ImGui.SameLine();
-        }
 
         if (ImGui.SmallButton(
             compactAdvanced ? "Hide details" : "Advanced"))
@@ -533,7 +513,6 @@ public sealed partial class Plugin
                     $"{slot}##slot_{slot}", selected))
                 {
                     compactSlot = slot;
-                    compactShowMoreRows = false;
                 }
 
                 if (selected)
