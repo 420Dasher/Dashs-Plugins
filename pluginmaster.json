@@ -180,11 +180,11 @@
     "Name":  "AdvancedDyeRowInspector",
     "InternalName":  "AdvancedDyeRowInspector",
     "AssemblyVersion":  "0.0.0.0",
-    "TestingAssemblyVersion":  "0.0.3.22",
+    "TestingAssemblyVersion":  "0.0.3.23",
     "Description":  "Read-only inspector for loaded character models, materials and candidate ID textures. Exact colorset row identification is planned for later development.",
     "Punchline":  "Inspect the materials behind your outfit.",
     "Changelog":  "Initial testing-only build.",
-    "TestingChangelog":  "DEV8 Stage 2A UI fix: Fit window preserves the manually selected width and fits content height within the viewport. Enables standard ImGui title-bar collapsing and adds a Minimize button. Material detection and read-only diagnostics are unchanged.",
+    "TestingChangelog":  "DEV8 Stage 2B: Replaces seven-point triangle sampling with 256x256 per-material UV coverage masks. Counts unique occupied cells, handles repeated UV tiles, samples decoded ID textures, and reports triangle and raster safety limits. Results remain experimental and read-only; active shapes and shader binding verification are still pending.",
     "ApplicableVersion":  "any",
     "Tags":  [
                  "glamour",
@@ -204,6 +204,6 @@
     "DownloadLinkInstall":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkUpdate":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkTesting":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
-    "LastUpdate":  1795376555
+    "LastUpdate":  1795380182
 }
 ]
