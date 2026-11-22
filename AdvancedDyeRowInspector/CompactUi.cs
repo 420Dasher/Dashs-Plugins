@@ -292,8 +292,11 @@ public sealed partial class Plugin
     {
         var display = ImGui.GetIO().DisplaySize;
 
-        float width =
-            PreferredCompactWidth(display.X);
+        // Fit the content height, not the user's chosen width.
+        // Only constrain width if it exceeds the viewport.
+        float width = MathF.Min(
+            ImGui.GetWindowSize().X,
+            MathF.Max(240f, display.X - 24f));
 
         float maxHeight = MathF.Max(
             220f, display.Y - 48f);
@@ -354,7 +357,7 @@ public sealed partial class Plugin
         bool visible = ImGui.Begin(
             "Advanced Dye Row Inspector###ADRIMain",
             ref open,
-            ImGuiWindowFlags.NoCollapse);
+            ImGuiWindowFlags.None);
 
         windowOpen = open;
 
@@ -406,7 +409,7 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "v0.0.3.21  |  Material source diagnostics");
+            "v0.0.3.22  |  Material source diagnostics");
 
         ImGui.Spacing();
 
@@ -429,6 +432,16 @@ public sealed partial class Plugin
 
         bool fitWindowRequested =
             ImGui.SmallButton("Fit window");
+
+        ImGui.SameLine();
+
+        // ImGui collapse is reversible from the title bar.
+        // It does not unload ADRI or modify the character.
+        if (ImGui.SmallButton("Minimize"))
+        {
+            ImGui.SetWindowCollapsed(
+                true, ImGuiCond.Always);
+        }
 
         ImGui.Spacing();
 
