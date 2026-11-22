@@ -34,18 +34,24 @@ public sealed partial class Plugin
 
         for (int n = 0; n + 2 < indices.Length; n += 3)
         {
-            if (uvTriangles >= 60000)
+            if (!HasUvBudget())
             {
-                uvTriangleLimitReached = true;
+                FlagUvBudgetStop();
                 report.Capped = true;
-                report.Status = "Global triangle budget reached.";
+                report.Status = DescribeUvBudgetStop();
                 return false;
             }
 
-            if (uvRasterBudgetExceeded)
+            // Count all attempted triangles, even those
+            // with unusable vertex/UV data.
+            uvTriangleAttempts++;
+            uvModelTriangleAttempts++;
+
+            if (uvRasterBudgetExceeded ||
+                uvModelRasterBudgetExceeded)
             {
                 report.Capped = true;
-                report.Status = "Global raster budget exhausted.";
+                report.Status = DescribeUvBudgetStop();
                 return false;
             }
 
@@ -77,14 +83,15 @@ public sealed partial class Plugin
             report.Triangles++;
             uvTriangles++;
 
-            if (uvRasterBudgetExceeded)
+            if (uvRasterBudgetExceeded ||
+                uvModelRasterBudgetExceeded)
             {
                 report.Capped = true;
                 return false;
             }
         }
 
-        return true;
+        return !report.Capped;
     }
 
     private void RasterizeTriangle(
@@ -200,15 +207,17 @@ public sealed partial class Plugin
 
                     for (int x = x0; x <= x1; x++)
                     {
-                        if (++uvRasterChecks >
-                            MaxUvRasterChecks)
+                        if (uvRasterChecks >= MaxUvRasterChecks ||
+                            uvModelRasterChecks >= uvModelRasterBudget)
                         {
-                            uvRasterBudgetExceeded = true;
+                            FlagUvBudgetStop();
                             report.Capped = true;
-                            report.Status =
-                                "UV raster work budget exceeded.";
+                            report.Status = DescribeUvBudgetStop();
                             return;
                         }
+
+                        uvRasterChecks++;
+                        uvModelRasterChecks++;
 
                         double px = shiftX + x + 0.5;
 

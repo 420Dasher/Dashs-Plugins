@@ -321,6 +321,7 @@ public sealed partial class Plugin
         uvTriangles = 0;
         uvProcessedModels = 0;
         ResetRasterCounters();
+        ResetUvFairness();
 
         foreach (var model in models.Where(x => x.IsOutfit))
             pendingUvModels.Enqueue(model);
@@ -333,8 +334,9 @@ public sealed partial class Plugin
         if (pendingUvModels.Count == 0)
             return;
 
-        // Exactly one model per UI frame.
+        // Exactly one model is processed per UI frame.
         var model = pendingUvModels.Dequeue();
+        BeginUvModelBudget();
 
         try
         {
@@ -364,7 +366,6 @@ public sealed partial class Plugin
             }
 
             var lod = mdl.Lods[0];
-
             int first = lod.MeshIndex;
             int end = first + lod.MeshCount;
 
@@ -377,40 +378,170 @@ public sealed partial class Plugin
                 return;
             }
 
-            // Structural audit runs before UV budget checks.
-            // It describes model data, not runtime visibility.
             AuditGeometryModel(model, mdl, first, end);
 
             int linked = 0;
             int skipped = 0;
-
             var failures = new List<string>();
 
             for (int meshIndex = first;
                  meshIndex < end;
                  meshIndex++)
             {
-                if (uvTriangles >= 60000 ||
-                    uvRasterBudgetExceeded)
+                var meshRecord = mdl.Meshes[meshIndex];
+
+                // Zero-size mesh records are legitimate
+                // structural placeholders, not read failures.
+                if (meshRecord.VertexCount == 0 &&
+                    meshRecord.IndexCount == 0)
                 {
-                    if (uvTriangles >= 60000)
-                        uvTriangleLimitReached = true;
+                    uvEmptyMeshes++;
+                    skipped++;
 
-                    string reason = uvRasterBudgetExceeded
-                        ? "Global UV raster work budget exhausted"
-                        : "Global 60,000 triangle limit reached";
+                    RecordMeshIssue(
+                        model, meshIndex,
+                        "Empty structural mesh",
+                        "(no geometry)",
+                        "Zero vertices and indices. " +
+                        "No UV sampling required.");
+                    continue;
+                }
 
-                    RecordCappedMesh(
-                        model, mdl, meshIndex, reason);
+                string materialName;
+
+                try
+                {
+                    materialName = ReadMaterialName(
+                        mdl, meshRecord.MaterialIndex);
+                }
+                catch (Exception ex)
+                {
+                    skipped++;
+                    uvUnmatchedMeshes++;
+
+                    RecordMeshIssue(
+                        model, meshIndex,
+                        "Invalid material reference",
+                        "(unresolved)",
+                        ex.GetType().Name + ": " + ex.Message);
+                    continue;
+                }
+
+                // Prefer exact material names. Only when
+                // none exist do we consider a unique race-
+                // prefix-normalized Penumbra tree link.
+                var exact = model.Materials
+                    .Where(m => string.Equals(
+                        BaseName(m.GamePath),
+                        materialName,
+                        StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                bool raceVariant = exact.Count == 0;
+
+                var candidates = raceVariant
+                    ? model.Materials
+                        .Where(m => IsRaceVariantName(
+                            materialName,
+                            BaseName(m.GamePath)))
+                        .ToList()
+                    : exact;
+
+                if (candidates.Count != 1)
+                {
+                    foreach (var candidate in candidates
+                        .Where(IsOutfitMaterial))
+                    {
+                        uvIncompleteMaterials.Add(candidate);
+                    }
 
                     skipped++;
                     uvUnmatchedMeshes++;
 
+                    string category = candidates.Count == 0
+                        ? "Unresolved material binding"
+                        : "Ambiguous material binding";
+
+                    RecordMeshIssue(
+                        model, meshIndex,
+                        category,
+                        materialName,
+                        $"{candidates.Count} Penumbra-linked " +
+                        "candidates after exact-first matching. " +
+                        "No unverified candidate was selected.");
+
+                    if (failures.Count < 5)
+                        failures.Add($"Mesh {meshIndex}: {category}");
+
+                    continue;
+                }
+
+                var material = candidates[0];
+
+                // Record but do not rasterize skin and other
+                // non-equipment resources under the current
+                // outfit-only analysis policy.
+                if (!IsOutfitMaterial(material))
+                {
+                    uvKnownNonOutfitMeshes++;
+                    skipped++;
+
+                    if (raceVariant)
+                        uvRaceVariantLinks++;
+
+                    RecordMeshIssue(
+                        model, meshIndex,
+                        raceVariant
+                            ? "Linked race-variant non-outfit resource"
+                            : "Linked non-outfit resource",
+                        materialName,
+                        "Unique Penumbra model-tree candidate: " +
+                        material.GamePath +
+                        (raceVariant
+                            ? " (matches after c#### normalization). "
+                            : " (exact basename). ") +
+                        "Excluded from outfit-only UV sampling; " +
+                        "not proof of invisibility or shader binding.");
+
+                    continue;
+                }
+
+                if (raceVariant)
+                {
+                    uvRaceVariantLinks++;
+                    uvRaceVariantMaterials.Add(material);
+
+                    RecordMeshIssue(
+                        model, meshIndex,
+                        "Provisional race-variant outfit binding",
+                        materialName,
+                        "Unique Penumbra-linked candidate: " +
+                        material.GamePath +
+                        ". Not exact-name or shader verification.");
+                }
+
+                // Check budgets only after identifying
+                // the material and excluding empty/non-
+                // outfit geometry. Later models retain
+                // their independently reserved allowance.
+                if (!HasUvBudget())
+                {
+                    FlagUvBudgetStop();
+                    uvIncompleteMaterials.Add(material);
+                    skipped++;
+                    uvUnmatchedMeshes++;
+
+                    string reason = DescribeUvBudgetStop();
+
+                    RecordMeshIssue(
+                        model, meshIndex,
+                        "UV safety-budget omission",
+                        materialName,
+                        reason + " No UV data sampled for mesh.");
+
                     if (failures.Count < 5)
                         failures.Add($"Mesh {meshIndex}: {reason}");
 
-                    // Keep accounting for remaining meshes.
-                    // Do not spend more UV raster budget.
                     continue;
                 }
 
@@ -422,106 +553,27 @@ public sealed partial class Plugin
                 }
                 catch (Exception ex)
                 {
-                    MarkMaterialIncomplete(model, mdl, meshIndex);
+                    uvIncompleteMaterials.Add(material);
+                    skipped++;
+                    uvUnmatchedMeshes++;
 
                     RecordMeshIssue(
-                        model,
-                        meshIndex,
+                        model, meshIndex,
                         "Geometry read failure",
-                        "(unavailable)",
+                        materialName,
                         ex.GetType().Name + ": " + ex.Message);
 
-                    skipped++;
-                    uvUnmatchedMeshes++;
-
                     if (failures.Count < 5)
-                    {
-                        failures.Add(
-                            $"Mesh {meshIndex}: {ex.Message}");
-                    }
+                        failures.Add($"Mesh {meshIndex}: {ex.Message}");
 
                     continue;
                 }
-
-                var matches = model.Materials
-                    .Where(IsOutfitMaterial)
-                    .Where(m => string.Equals(
-                        BaseName(m.GamePath),
-                        raw.MaterialName,
-                        StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-
-                if (matches.Count != 1)
-                {
-                    MarkMaterialIncomplete(model, mdl, meshIndex);
-
-                    var linkedByName = model.Materials
-                        .Where(m => string.Equals(
-                            BaseName(m.GamePath),
-                            raw.MaterialName,
-                            StringComparison.OrdinalIgnoreCase))
-                        .ToList();
-
-                    string category;
-                    string detail;
-
-                    if (matches.Count > 1)
-                    {
-                        category = "Ambiguous outfit material";
-                        detail =
-                            $"{matches.Count} outfit material links " +
-                            "have the same mesh material name.";
-                    }
-                    else if (linkedByName.Count == 1 &&
-                             !IsOutfitMaterial(linkedByName[0]))
-                    {
-                        category = "Linked non-outfit resource";
-                        detail = linkedByName[0].GamePath;
-                    }
-                    else if (linkedByName.Count > 1)
-                    {
-                        category = "Ambiguous resource binding";
-                        detail =
-                            $"{linkedByName.Count} Penumbra-linked " +
-                            "materials have this name.";
-                    }
-                    else
-                    {
-                        category = "Unresolved material binding";
-                        detail =
-                            "No unique linked material with " +
-                            "the mesh's material name.";
-                    }
-
-                    RecordMeshIssue(
-                        model,
-                        meshIndex,
-                        category,
-                        raw.MaterialName,
-                        detail);
-
-                    skipped++;
-                    uvUnmatchedMeshes++;
-
-                    if (failures.Count < 5)
-                    {
-                        failures.Add(
-                            $"Mesh {meshIndex}: material " +
-                            $"'{raw.MaterialName}' has " +
-                            $"{matches.Count} matches");
-                    }
-
-                    continue;
-                }
-
-                var material = matches[0];
 
                 var ids = material.Textures
                     .Where(t => t.IsId &&
                         t.Decoded?.Success == true)
                     .GroupBy(
-                        t => string.IsNullOrWhiteSpace(
-                            t.ActualPath)
+                        t => string.IsNullOrWhiteSpace(t.ActualPath)
                             ? t.GamePath
                             : t.ActualPath,
                         StringComparer.OrdinalIgnoreCase)
@@ -531,29 +583,22 @@ public sealed partial class Plugin
                 if (ids.Count != 1)
                 {
                     uvIncompleteMaterials.Add(material);
-
-                    RecordMeshIssue(
-                        model,
-                        meshIndex,
-                        ids.Count == 0
-                            ? "ID texture unavailable"
-                            : "Ambiguous ID textures",
-                        raw.MaterialName,
-                        ids.Count == 0
-                            ? "No decoded ID texture uniquely " +
-                              "linked to this outfit material."
-                            : $"{ids.Count} resolved ID texture " +
-                              "sources linked to this material.");
-
                     skipped++;
                     uvUnmatchedMeshes++;
 
+                    string reason = ids.Count == 0
+                        ? "No unique decoded ID texture"
+                        : "Ambiguous ID texture sources";
+
+                    RecordMeshIssue(
+                        model, meshIndex,
+                        reason,
+                        materialName,
+                        $"{ids.Count} resolved decoded ID " +
+                        "texture candidates. Shader usage unverified.");
+
                     if (failures.Count < 5)
-                    {
-                        failures.Add(
-                            $"Mesh {meshIndex}: " +
-                            $"{ids.Count} matching ID textures");
-                    }
+                        failures.Add($"Mesh {meshIndex}: {reason}");
 
                     continue;
                 }
@@ -592,13 +637,16 @@ public sealed partial class Plugin
                         uvUnmatchedMeshes++;
 
                         RecordMeshIssue(
-                            model,
-                            meshIndex,
+                            model, meshIndex,
                             "Partial UV rasterization",
-                            raw.MaterialName,
+                            materialName,
                             report.Status.Length > 0
                                 ? report.Status
-                                : "Global scan budget interrupted this mesh.");
+                                : "Incomplete UV triangle coverage.");
+
+                        if (failures.Count < 5)
+                            failures.Add(
+                                $"Mesh {meshIndex}: partial UV coverage");
                     }
                 }
                 catch (Exception ex)
@@ -607,21 +655,17 @@ public sealed partial class Plugin
                     report.Capped = true;
                     report.Status = ex.Message;
 
-                    RecordMeshIssue(
-                        model,
-                        meshIndex,
-                        "Texture or UV sampling failure",
-                        raw.MaterialName,
-                        ex.GetType().Name + ": " + ex.Message);
-
                     skipped++;
                     uvUnmatchedMeshes++;
 
+                    RecordMeshIssue(
+                        model, meshIndex,
+                        "Texture or UV sampling failure",
+                        materialName,
+                        ex.GetType().Name + ": " + ex.Message);
+
                     if (failures.Count < 5)
-                    {
-                        failures.Add(
-                            $"Mesh {meshIndex}: {ex.Message}");
-                    }
+                        failures.Add($"Mesh {meshIndex}: {ex.Message}");
                 }
             }
 
@@ -629,15 +673,14 @@ public sealed partial class Plugin
                 uvMatchedModels++;
 
             uvModelStatus[model] =
-                $"{linked} matched mesh(es), " +
-                $"{skipped} skipped. " +
+                $"{linked} fully sampled mesh(es), " +
+                $"{skipped} excluded/incomplete. " +
                 string.Join(" | ", failures);
         }
         catch (Exception ex)
         {
             RecordMeshIssue(
-                model,
-                -1,
+                model, -1,
                 "Model processing failure",
                 "(model)",
                 ex.GetType().Name + ": " + ex.Message);
@@ -647,14 +690,12 @@ public sealed partial class Plugin
                 ex.GetType().Name + ": " + ex.Message;
 
             Log.Warning(
-                $"ADRI DEV3 FIX1 model processing failed: {ex}");
+                $"ADRI Stage 2D model processing failed: {ex}");
         }
         finally
         {
             uvProcessedModels++;
 
-            // Discard temporary decoded texture buffers
-            // once the final model is processed.
             if (pendingUvModels.Count == 0)
             {
                 uvPixelCache.Clear();
@@ -962,6 +1003,13 @@ public sealed partial class Plugin
                 "UV warning: " + report.Status);
         }
 
+        if (uvRaceVariantMaterials.Contains(material))
+        {
+            ImGui.TextDisabled(
+                "PROVISIONAL: race-variant material-name " +
+                "match. Runtime shader use is unverified.");
+        }
+
         var rows = RankedUvRows(report).ToArray();
 
         if (rows.Length == 0)
@@ -1025,9 +1073,16 @@ public sealed partial class Plugin
 
         ImGui.TextDisabled(
             $"UV: {uvMatchedModels} model(s), " +
-            $"{uvMatchedMeshes} matched meshes, " +
-            $"{uvUnmatchedMeshes} unmatched, " +
-            $"{uvTriangles} triangles sampled.");
+            $"{uvMatchedMeshes} complete meshes, " +
+            $"{uvUnmatchedMeshes} incomplete/unresolved.");
+        ImGui.TextDisabled(
+            $"Non-outfit: {uvKnownNonOutfitMeshes}, " +
+            $"empty: {uvEmptyMeshes}, " +
+            $"race-variant links: {uvRaceVariantLinks}.");
+        ImGui.TextDisabled(
+            $"Triangles: {uvTriangles:N0} rasterized, " +
+            $"{uvTriangleAttempts:N0} attempted; " +
+            $"per-model allowance {uvModelTriangleBudget:N0}.");
     }
 
     // ======================================================
@@ -1045,6 +1100,17 @@ public sealed partial class Plugin
             "NOT active-shape or rendered-visibility proof");
 
         sb.AppendLine("Flip V: " + flipUvV);
+        sb.AppendLine(
+            $"Triangle attempts: {uvTriangleAttempts}/" +
+            $"{MaxUvTotalTriangleAttempts}; " +
+            $"per-model cap: {uvModelTriangleBudget}");
+        sb.AppendLine(
+            $"Per-model raster cap: {uvModelRasterBudget}; " +
+            $"model budget stops: {uvModelBudgetStops}");
+        sb.AppendLine(
+            $"Non-outfit meshes: {uvKnownNonOutfitMeshes}; " +
+            $"empty meshes: {uvEmptyMeshes}; " +
+            $"race-variant links: {uvRaceVariantLinks}");
         sb.AppendLine(
             $"Raster checks: {uvRasterChecks}/{MaxUvRasterChecks}");
         sb.AppendLine(
@@ -1071,6 +1137,9 @@ public sealed partial class Plugin
         foreach (var entry in uvReports)
         {
             var r = entry.Value;
+            string binding = uvRaceVariantMaterials.Contains(entry.Key)
+                ? "race-variant-provisional"
+                : "exact-material-basename";
 
             sb.AppendLine(
                 $"MATERIAL {entry.Key.GamePath} " +
@@ -1083,6 +1152,7 @@ public sealed partial class Plugin
                 $"skipped={r.SkippedTriangles} " +
                 $"capped={r.Capped} " +
                 $"incomplete={r.Capped || uvIncompleteMaterials.Contains(entry.Key)} " +
+                $"binding={binding} " +
                 $"status={r.Status}");
 
             if (r.CleanSamples > 0)

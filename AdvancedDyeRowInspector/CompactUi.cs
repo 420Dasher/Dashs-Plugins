@@ -409,7 +409,7 @@ public sealed partial class Plugin
         }
 
         ImGui.TextDisabled(
-            "v0.0.3.23  |  UV coverage-mask analysis");
+            $"v{PluginBuildVersion}  |  UV coverage-mask analysis");
 
         ImGui.Spacing();
 
