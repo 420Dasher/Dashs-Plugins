@@ -180,11 +180,11 @@
     "Name":  "AdvancedDyeRowInspector",
     "InternalName":  "AdvancedDyeRowInspector",
     "AssemblyVersion":  "0.0.0.0",
-    "TestingAssemblyVersion":  "0.0.3.26",
+    "TestingAssemblyVersion":  "0.0.3.27",
     "Description":  "Read-only inspector for loaded character models, materials and candidate ID textures. Exact colorset row identification is planned for later development.",
     "Punchline":  "Inspect the materials behind your outfit.",
     "Changelog":  "Initial testing-only build.",
-    "TestingChangelog": "DEV8 Stage 2E: Recognizes numerically suffixed ID texture filenames, separates invalid UV, unsafe UV and zero-area triangle counts, and corrects rasterized triangle accounting. Experimental, read-only; shader bindings and rendered visibility remain unverified.",
+    "TestingChangelog": "DEV8 Stage 2F: Adds on-demand read-only native model mask inspection with Penumbra resource pointer cross-checks, live attribute and shape masks, native material slot presence, and LOD0 submesh bit comparisons. Does not prove draw submission or rendered visibility.",
     "ApplicableVersion":  "any",
     "Tags":  [
                  "glamour",
@@ -204,6 +204,6 @@
     "DownloadLinkInstall":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkUpdate":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkTesting":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
-    "LastUpdate":  1795390474
+    "LastUpdate":  1795470395
 }
 ]
