@@ -755,6 +755,8 @@ public sealed partial class Plugin : IDalamudPlugin
         previewTargets.Clear();
         previewTargetStatus = "Not checked.";
 
+        ResetActiveGeometryAudit();
+
         nodeCount = 0;
         decodedCount = 0;
 
@@ -848,7 +850,7 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 2E");
+        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 2F");
         sb.AppendLine("Version: " + PluginBuildVersion);
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
@@ -925,6 +927,7 @@ public sealed partial class Plugin : IDalamudPlugin
         AppendMaterialAuditDiagnostics(sb);
         AppendRuntimeMaterialDiagnostics(sb);
         AppendPreviewTargetDiagnostics(sb);
+        AppendActiveGeometryDiagnostics(sb);
 
         sb.AppendLine("[FLAT PENUMBRA RESOURCE SNAPSHOT]");
 

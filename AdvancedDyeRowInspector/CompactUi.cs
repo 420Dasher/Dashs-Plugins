@@ -230,6 +230,7 @@ public sealed partial class Plugin
             }
 
             DrawMaterialAudit(selectedModels);
+            DrawActiveGeometryAudit(selectedModels);
 
             if (ImGui.TreeNode("Connection details"))
             {
