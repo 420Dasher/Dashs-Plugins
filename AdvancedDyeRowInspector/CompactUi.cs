@@ -119,11 +119,11 @@ public sealed partial class Plugin
     {
         ImGui.Separator();
 
-        ImGui.TextUnformatted(compactSlot);
+        ImGui.TextUnformatted(
+            NativeMaterialDisplayName(material));
 
         ImGui.TextDisabled(
-            "Material: " +
-            FriendlyMaterialName(material.GamePath));
+            "MTRL: " + DisplayName(material.GamePath));
 
         var sharedSlots = VerifiedSharedSlots(
             material, compactSlot);
@@ -228,6 +228,8 @@ public sealed partial class Plugin
 
                 ImGui.TreePop();
             }
+
+            ImGui.TextDisabled(nativeMaterialLabelStatus);
 
             DrawMaterialAudit(selectedModels);
             DrawActiveGeometryAudit(selectedModels);

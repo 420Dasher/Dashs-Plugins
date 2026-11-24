@@ -19,7 +19,9 @@ public sealed partial class Plugin
     private sealed class PreviewTargetEvidence
     {
         public string ModelPath = "";
+        public string ModelActualPath = "";
         public string MaterialPath = "";
+        public string MaterialActualPath = "";
         public int ModelSlot;
         public int MaterialSlot;
         public uint Width;
@@ -293,7 +295,9 @@ public sealed partial class Plugin
                         var evidence = new PreviewTargetEvidence
                         {
                             ModelPath = modelGame,
+                            ModelActualPath = modelActual,
                             MaterialPath = materialGame,
+                            MaterialActualPath = materialActual,
                             ModelSlot = slot,
                             MaterialSlot = index
                         };
@@ -337,6 +341,102 @@ public sealed partial class Plugin
                 "Preview target inspection failed: " +
                 ex.GetType().Name + ": " + ex.Message;
         }
+    }
+
+    private readonly Dictionary<MaterialEntry, (int ModelSlot, int MaterialSlot)>
+        nativeMaterialIndices = new();
+
+    private string nativeMaterialLabelStatus = "Not checked.";
+
+    private void CaptureNativeMaterialLabels()
+    {
+        nativeMaterialIndices.Clear();
+
+        var selectedModels = models
+            .Where(m => m.IsOutfit && m.Materials.Any(IsOutfitMaterial))
+            .ToList();
+
+        var selectedMaterials = selectedModels
+            .SelectMany(m => m.Materials)
+            .Where(IsOutfitMaterial)
+            .Distinct()
+            .ToArray();
+
+        if (selectedMaterials.Length == 0)
+        {
+            nativeMaterialLabelStatus =
+                "No outfit materials available for native mapping.";
+            return;
+        }
+
+        // Existing Penumbra/native pointer verification.
+        // Performed once during the outfit scan.
+        ResolvePreviewTargets(selectedMaterials, selectedModels);
+
+        foreach (var model in selectedModels)
+        {
+            foreach (var material in model.Materials.Where(IsOutfitMaterial))
+            {
+                var matches = previewTargets.Where(t =>
+                    SameRuntimeResource(
+                        model.GamePath,
+                        model.ActualPath,
+                        t.ModelPath,
+                        t.ModelActualPath) &&
+                    SameRuntimeResource(
+                        material.GamePath,
+                        material.ActualPath,
+                        t.MaterialPath,
+                        t.MaterialActualPath))
+                    .ToArray();
+
+                // Never guess native indices or accept ambiguity.
+                if (matches.Length != 1)
+                    continue;
+
+                var target = matches[0];
+
+                if (target.MaterialSlot < 0 ||
+                    target.MaterialSlot >= CharacterBase.MaterialsPerSlot)
+                    continue;
+
+                nativeMaterialIndices[material] =
+                    (target.ModelSlot, target.MaterialSlot);
+            }
+        }
+
+        nativeMaterialLabelStatus =
+            $"Native material labels verified: " +
+            $"{nativeMaterialIndices.Count}/{selectedMaterials.Length} " +
+            "(scan-time snapshot).";
+    }
+
+    private string NativeMaterialDisplayName(MaterialEntry material)
+    {
+        if (!nativeMaterialIndices.TryGetValue(material, out var target))
+            return "Material (native index unverified)";
+
+        return $"Material {(char)('A' + target.MaterialSlot)}";
+    }
+
+    private void AppendNativeMaterialLabelDiagnostics(StringBuilder sb)
+    {
+        sb.AppendLine("[DEV8 STAGE 2I NATIVE MATERIAL LABELS]");
+        sb.AppendLine(nativeMaterialLabelStatus);
+        sb.AppendLine(
+            "Letters are zero-based native material indices, " +
+            "verified against live model/material pointers at scan time.");
+
+        foreach (var pair in nativeMaterialIndices)
+        {
+            sb.AppendLine(
+                $"Model slot {pair.Value.ModelSlot}, " +
+                $"Material {(char)('A' + pair.Value.MaterialSlot)} " +
+                $"(native index {pair.Value.MaterialSlot}): " +
+                pair.Key.GamePath);
+        }
+
+        sb.AppendLine();
     }
 
     private void DrawPreviewTargetResolver(

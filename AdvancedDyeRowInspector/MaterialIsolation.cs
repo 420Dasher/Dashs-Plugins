@@ -241,7 +241,7 @@ public sealed partial class Plugin
             original->DecRef();
 
             isoStatus = "Magenta: " +
-                FriendlyMaterialName(material.GamePath) +
+                NativeMaterialDisplayName(material) +
                 " (maximum 8 seconds).";
         }
         catch (Exception ex)
@@ -321,8 +321,8 @@ public sealed partial class Plugin
             {
                 if (ImGui.SmallButton(
                     "Highlight " +
-                    FriendlyMaterialName(material.GamePath) +
-                    "##ADRIIso" + material.GamePath))
+                    NativeMaterialDisplayName(material) +
+                    "##ADRIIso" + material.GetHashCode()))
                     StartMaterialIsolation(material, selectedModels);
             }
         }

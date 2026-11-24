@@ -805,6 +805,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
         ReadFlatPaths(index);
         ReadTree(index);
+        CaptureNativeMaterialLabels();
         AnalyzeGeometry();
 
         int materials = models.Sum(x => x.Materials.Count);
@@ -853,7 +854,7 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 2H");
+        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 2I");
         sb.AppendLine("Version: " + PluginBuildVersion);
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
@@ -932,6 +933,7 @@ public sealed partial class Plugin : IDalamudPlugin
         AppendPreviewTargetDiagnostics(sb);
         AppendActiveGeometryDiagnostics(sb);
         AppendSpatialGeometryDiagnostics(sb);
+        AppendNativeMaterialLabelDiagnostics(sb);
         AppendMaterialIsolationDiagnostics(sb);
 
         sb.AppendLine("[FLAT PENUMBRA RESOURCE SNAPSHOT]");
@@ -1043,7 +1045,10 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void DrawMaterial(MaterialEntry material, int index)
     {
-        string name = DisplayName(material.GamePath);
+        string name = nativeMaterialIndices.ContainsKey(material)
+            ? NativeMaterialDisplayName(material) +
+              " - " + DisplayName(material.GamePath)
+            : DisplayName(material.GamePath);
 
         if (!ImGui.TreeNode(
             $"{name}##mat_{index}_{material.GetHashCode()}"))
