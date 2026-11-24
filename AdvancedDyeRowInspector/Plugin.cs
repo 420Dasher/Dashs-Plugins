@@ -197,6 +197,7 @@ public sealed partial class Plugin : IDalamudPlugin
     public void Dispose()
     {
 
+        StopMaterialIsolation("Plugin disposed.");
         Commands.RemoveHandler("/adri");
         Pi.UiBuilder.Draw -= Draw;
         Pi.UiBuilder.OpenMainUi -= Open;
@@ -741,6 +742,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private void Scan()
     {
 
+        StopMaterialIsolation("Outfit rescan.");
         scanned = true;
         scanTime = DateTime.Now;
 
@@ -851,7 +853,7 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 2G");
+        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 2H");
         sb.AppendLine("Version: " + PluginBuildVersion);
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
@@ -930,6 +932,7 @@ public sealed partial class Plugin : IDalamudPlugin
         AppendPreviewTargetDiagnostics(sb);
         AppendActiveGeometryDiagnostics(sb);
         AppendSpatialGeometryDiagnostics(sb);
+        AppendMaterialIsolationDiagnostics(sb);
 
         sb.AppendLine("[FLAT PENUMBRA RESOURCE SNAPSHOT]");
 
@@ -1199,6 +1202,8 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void Draw()
     {
+        MaintainMaterialIsolation();
         DrawCompact();
+        MaintainMaterialIsolation();
     }
 }

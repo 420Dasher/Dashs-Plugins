@@ -232,6 +232,7 @@ public sealed partial class Plugin
             DrawMaterialAudit(selectedModels);
             DrawActiveGeometryAudit(selectedModels);
             DrawSpatialGeometryAudit(selectedModels);
+            DrawMaterialIsolation(selectedModels);
 
             if (ImGui.TreeNode("Connection details"))
             {
