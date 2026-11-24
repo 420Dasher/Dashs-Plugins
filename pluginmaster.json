@@ -180,11 +180,11 @@
     "Name":  "AdvancedDyeRowInspector",
     "InternalName":  "AdvancedDyeRowInspector",
     "AssemblyVersion":  "0.0.0.0",
-    "TestingAssemblyVersion":  "0.0.3.30",
+    "TestingAssemblyVersion":  "0.0.3.31",
     "Description":  "Read-only inspector for loaded character models, materials and candidate ID textures. Exact colorset row identification is planned for later development.",
     "Punchline":  "Inspect the materials behind your outfit.",
     "Changelog":  "Initial testing-only build.",
-    "TestingChangelog": "DEV8 Stage 2I: Aligns ADRI material labels with Glamourer's native A-Z material indices using verified runtime model/material pointers. Preserves original MTRL filenames, adds diagnostic mappings and updates isolation labels. Testing-only.",
+    "TestingChangelog": "DEV8 Stage 2J: Experimental individual dye-row highlighting using live GPU colorset readback, preserving other rows and existing Glamourer dyes, with automatic 8-second restoration.",
     "ApplicableVersion":  "any",
     "Tags":  [
                  "glamour",
@@ -204,6 +204,6 @@
     "DownloadLinkInstall":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkUpdate":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkTesting":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
-    "LastUpdate":  1795562404
+    "LastUpdate":  1795563659
 }
 ]
