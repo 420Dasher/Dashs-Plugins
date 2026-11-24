@@ -180,11 +180,11 @@
     "Name":  "AdvancedDyeRowInspector",
     "InternalName":  "AdvancedDyeRowInspector",
     "AssemblyVersion":  "0.0.0.0",
-    "TestingAssemblyVersion":  "0.0.3.28",
+    "TestingAssemblyVersion":  "0.0.3.29",
     "Description":  "Read-only inspector for loaded character models, materials and candidate ID textures. Exact colorset row identification is planned for later development.",
     "Punchline":  "Inspect the materials behind your outfit.",
     "Changelog":  "Initial testing-only build.",
-    "TestingChangelog": "DEV8 Stage 2G: Adds read-only model-local position bounds, referenced-vertex centroids and pairwise AABB overlap diagnostics. Uses bounded on-demand parsing. Static mesh overlap does not prove runtime occlusion, draw submission or visible pixels.",
+    "TestingChangelog": "DEV8 Stage 2H: Experimental 8-second reversible material isolation preview. Native colorset texture swapping with guarded restoration. Testing-only.",
     "ApplicableVersion":  "any",
     "Tags":  [
                  "glamour",
@@ -204,6 +204,6 @@
     "DownloadLinkInstall":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkUpdate":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkTesting":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
-    "LastUpdate":  1795479442
+    "LastUpdate":  1795561543
 }
 ]
