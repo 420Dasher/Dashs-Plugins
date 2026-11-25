@@ -57,11 +57,11 @@ public sealed partial class Plugin : IDalamudPlugin
     private bool windowOpen;
     private bool scanned;
 
-    private bool dyeProbeInitialized;
     private bool dyePopupOpen;
+    private bool dyeAutoOpenedAdri;
+    private bool dyeScanPending;
+    private DateTime dyeScanDueUtc;
     private string dyeProbeError = "";
-    private int dyePopupOpenEvents;
-    private int dyePopupCloseEvents;
 
     private unsafe void ObserveGlamourerDyeWindow()
     {
@@ -77,18 +77,9 @@ public sealed partial class Plugin : IDalamudPlugin
 
             int frame = ImGui.GetFrameCount();
 
-            // Allow the previous frame because plugin draw
-            // callback ordering is not guaranteed.
             bool active = window != null &&
                 window->LastFrameActive >= frame - 1 &&
                 window->LastFrameActive <= frame;
-
-            if (!dyeProbeInitialized)
-            {
-                dyeProbeInitialized = true;
-                dyePopupOpen = active;
-                return;
-            }
 
             if (active == dyePopupOpen)
                 return;
@@ -96,22 +87,64 @@ public sealed partial class Plugin : IDalamudPlugin
             dyePopupOpen = active;
 
             if (active)
-                dyePopupOpenEvents++;
-            else
-                dyePopupCloseEvents++;
+            {
+                // Only take ownership if ADRI was closed.
+                if (!windowOpen)
+                {
+                    windowOpen = true;
+                    dyeAutoOpenedAdri = true;
+                }
 
-            Log.Information(active
-                ? "ADRI: Glamourer Advanced Dyes opened."
-                : "ADRI: Glamourer Advanced Dyes closed.");
+                // Never carry an old highlight into a new scan.
+                UpdateCompactHover(
+                    null, -1, new List<ModelEntry>());
+
+                scanned = false;
+                dyeScanPending = true;
+                dyeScanDueUtc =
+                    DateTime.UtcNow.AddMilliseconds(150);
+            }
+            else
+            {
+                dyeScanPending = false;
+
+                if (dyeAutoOpenedAdri)
+                {
+                    windowOpen = false;
+                    StopMaterialIsolation(
+                        "Glamourer Advanced Dyes closed.");
+                }
+
+                dyeAutoOpenedAdri = false;
+            }
         }
         catch (Exception ex)
         {
-            dyeProbeError = ex.GetType().Name + ": " + ex.Message;
-            Log.Warning("ADRI dye window probe failed: " + ex);
+            dyeProbeError =
+                ex.GetType().Name + ": " + ex.Message;
+
+            Log.Warning(
+                "ADRI Glamourer integration failed: " + ex);
         }
     }
 
+    private void RunPendingGlamourerDyeScan()
+    {
+        if (!dyeScanPending)
+            return;
 
+        if (!dyePopupOpen || !windowOpen)
+        {
+            dyeScanPending = false;
+            return;
+        }
+
+        if (DateTime.UtcNow < dyeScanDueUtc)
+            return;
+
+        dyeScanPending = false;
+        Scan();
+    }
 
     private string actorName = "Not scanned";
     private string actorIndex = "-";
@@ -235,11 +268,13 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void OnCommand(string command, string arguments)
     {
+        dyeAutoOpenedAdri = false;
         windowOpen = !windowOpen;
     }
 
     private void Open()
     {
+        dyeAutoOpenedAdri = false;
         windowOpen = true;
     }
 
@@ -757,6 +792,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void Scan()
     {
+        dyeScanPending = false;
 
         StopMaterialIsolation("Outfit rescan.");
         scanned = true;
@@ -856,14 +892,14 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 2N-A1");
+        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 2N-A2");
         sb.AppendLine("Version: " + PluginBuildVersion);
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
         sb.AppendLine("Object index: " + actorIndex);
         sb.AppendLine("Tree: " + treeStatus);
         sb.AppendLine("Paths: " + pathStatus);
-        sb.AppendLine("Glamourer: " + glamourerStatus);
+        sb.AppendLine("Glamourer: " + glamourerStatus); sb.AppendLine("Dye integration: " + (dyeProbeError.Length == 0 ? "Ready" : dyeProbeError));
         sb.AppendLine("Status: " + status);
         sb.AppendLine();
 
@@ -957,6 +993,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private void Draw()
     {
         ObserveGlamourerDyeWindow();
+        RunPendingGlamourerDyeScan();
         MaintainMaterialIsolation();
         DrawCompact();
         MaintainMaterialIsolation();

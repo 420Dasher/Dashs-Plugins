@@ -452,12 +452,6 @@ public sealed partial class Plugin
             ImGui.SetTooltip("Fit window to content.");
         ImGui.Spacing();
 
-        ImGui.TextDisabled(
-            "Glamourer Advanced Dyes: " +
-            (dyeProbeError.Length > 0 ? "PROBE ERROR" :
-             !dyeProbeInitialized ? "waiting" :
-             dyePopupOpen ? "OPEN" : "closed") +
-            $" | opened {dyePopupOpenEvents}, closed {dyePopupCloseEvents}");
 
         if (!scanned)
         {
