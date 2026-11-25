@@ -57,6 +57,60 @@ public sealed partial class Plugin : IDalamudPlugin
     private bool windowOpen;
     private bool scanned;
 
+    private bool dyeProbeInitialized;
+    private bool dyePopupOpen;
+    private string dyeProbeError = "";
+    private int dyePopupOpenEvents;
+    private int dyePopupCloseEvents;
+
+    private unsafe void ObserveGlamourerDyeWindow()
+    {
+        if (dyeProbeError.Length != 0)
+            return;
+
+        try
+        {
+            ImGuiWindow* window;
+
+            fixed (byte* name = "###Glamourer Advanced Dyes\0"u8)
+                window = ImGuiPNative.FindWindowByName(name);
+
+            int frame = ImGui.GetFrameCount();
+
+            // Allow the previous frame because plugin draw
+            // callback ordering is not guaranteed.
+            bool active = window != null &&
+                window->LastFrameActive >= frame - 1 &&
+                window->LastFrameActive <= frame;
+
+            if (!dyeProbeInitialized)
+            {
+                dyeProbeInitialized = true;
+                dyePopupOpen = active;
+                return;
+            }
+
+            if (active == dyePopupOpen)
+                return;
+
+            dyePopupOpen = active;
+
+            if (active)
+                dyePopupOpenEvents++;
+            else
+                dyePopupCloseEvents++;
+
+            Log.Information(active
+                ? "ADRI: Glamourer Advanced Dyes opened."
+                : "ADRI: Glamourer Advanced Dyes closed.");
+        }
+        catch (Exception ex)
+        {
+            dyeProbeError = ex.GetType().Name + ": " + ex.Message;
+            Log.Warning("ADRI dye window probe failed: " + ex);
+        }
+    }
+
 
 
     private string actorName = "Not scanned";
@@ -802,7 +856,7 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 2M CLEANUP");
+        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 2N-A1");
         sb.AppendLine("Version: " + PluginBuildVersion);
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
@@ -902,6 +956,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void Draw()
     {
+        ObserveGlamourerDyeWindow();
         MaintainMaterialIsolation();
         DrawCompact();
         MaintainMaterialIsolation();
