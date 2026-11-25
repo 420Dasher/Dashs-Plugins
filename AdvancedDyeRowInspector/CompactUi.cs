@@ -115,7 +115,7 @@ public sealed partial class Plugin
     }
     private void DrawCompactMaterial(
         MaterialEntry material,
-        int index)
+        int index, List<ModelEntry> selectedModels)
     {
         ImGui.Separator();
 
@@ -138,8 +138,60 @@ public sealed partial class Plugin
         if (compactAdvanced && showPaths)
             ImGui.TextWrapped(material.GamePath);
 
+        if (pendingUvModels.Count > 0)
+        {
+            ImGui.TextDisabled("Scanning UV candidates...");
+            return;
+        }
+
+        if (!nativeMaterialIndices.ContainsKey(material))
+        {
+            ImGui.TextDisabled(
+                "Row preview unavailable: native index unverified.");
+            return;
+        }
+
+        if (!uvReports.TryGetValue(material, out var report) ||
+            report.Capped ||
+            report.CleanSamples == 0 ||
+            uvIncompleteMaterials.Contains(material) ||
+            uvRaceVariantMaterials.Contains(material))
+        {
+            ImGui.TextDisabled(
+                "UV candidates incomplete or unavailable.");
+            return;
+        }
+
+        var rows = RankedUvRows(report).ToArray();
+
+        if (rows.Length == 0)
+        {
+            ImGui.TextDisabled(
+                "No UV candidates above the threshold.");
+            return;
+        }
+
         ImGui.TextDisabled(
-            "Dye rows: not yet verified.");
+            "UV candidates (visibility not verified):");
+
+        foreach (var row in rows)
+        {
+            int number = int.Parse(row.Row[..^1]);
+            int rowIndex = (number - 1) * 2 +
+                (row.Row[^1] == 'B' ? 1 : 0);
+
+            ImGui.TextUnformatted(
+                $"Row {row.Row} ({row.Percent:F1}% UV)");
+
+            ImGui.SameLine();
+
+            if (ImGui.SmallButton(
+                $"Highlight##ADRICompactRow_{index}_{rowIndex}"))
+            {
+                StartMaterialIsolation(
+                    material, selectedModels, rowIndex);
+            }
+        }
     }
 
     private void DrawCompactAdvanced(
@@ -549,6 +601,20 @@ public sealed partial class Plugin
 
         ImGui.Spacing();
 
+        if (isoOriginal != 0)
+        {
+            ImGui.TextDisabled(isoStatus);
+
+            if (ImGui.SmallButton(
+                "Restore now##ADRICompactRestore"))
+                StopMaterialIsolation("Original texture restored.");
+        }
+        else if (isoStatus.StartsWith(
+            "Highlight failed:", StringComparison.Ordinal))
+        {
+            ImGui.TextWrapped(isoStatus);
+        }
+
         float resultsStartY = ImGui.GetCursorPosY();
         float resultsContentHeight = 0f;
 
@@ -566,7 +632,7 @@ public sealed partial class Plugin
             {
                 for (int i = 0; i < materials.Count; i++)
                 {
-                    DrawCompactMaterial(materials[i], i);
+                    DrawCompactMaterial(materials[i], i, selectedModels);
                 }
             }
 
