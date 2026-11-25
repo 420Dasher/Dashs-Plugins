@@ -13,6 +13,37 @@ public sealed partial class Plugin
     private string compactSlot = "Body";
     private bool compactAdvanced;
     private bool compactInitialWidthChecked;
+    private MaterialEntry? compactHoverMaterial;
+    private int compactHoverRow = -1;
+    private DateTime compactHoverSince;
+    private bool compactHoverAttempted;
+    private bool compactHoverOwnsPreview;
+
+    private void UpdateCompactHover(
+        MaterialEntry? material, int row,
+        List<ModelEntry> selectedModels)
+    {
+        if (!ReferenceEquals(compactHoverMaterial, material) ||
+            compactHoverRow != row)
+        {
+            if (compactHoverOwnsPreview && isoOriginal != 0)
+                StopMaterialIsolation("Hover preview restored.");
+
+            compactHoverOwnsPreview = false;
+            compactHoverMaterial = material;
+            compactHoverRow = row;
+            compactHoverSince = DateTime.UtcNow;
+            compactHoverAttempted = false;
+        }
+
+        if (material == null || compactHoverAttempted ||
+            (DateTime.UtcNow - compactHoverSince).TotalMilliseconds < 150)
+            return;
+
+        compactHoverAttempted = true;
+        StartMaterialIsolation(material, selectedModels, row);
+        compactHoverOwnsPreview = isoOriginal != 0;
+    }
 
 
     // Use the actual Dalamud theme.
@@ -115,7 +146,9 @@ public sealed partial class Plugin
     }
     private void DrawCompactMaterial(
         MaterialEntry material,
-        int index, List<ModelEntry> selectedModels)
+        int index,
+        ref MaterialEntry? hoveredMaterial,
+        ref int hoveredRowIndex)
     {
         ImGui.Separator();
 
@@ -180,16 +213,13 @@ public sealed partial class Plugin
             int rowIndex = (number - 1) * 2 +
                 (row.Row[^1] == 'B' ? 1 : 0);
 
-            ImGui.TextUnformatted(
-                $"Row {row.Row} ({row.Percent:F1}% UV)");
+            ImGui.Selectable(
+                $"Row {row.Row} ({row.Percent:F1}% UV)##ADRIHover_{index}_{rowIndex}");
 
-            ImGui.SameLine();
-
-            if (ImGui.SmallButton(
-                $"Highlight##ADRICompactRow_{index}_{rowIndex}"))
+            if (ImGui.IsItemHovered())
             {
-                StartMaterialIsolation(
-                    material, selectedModels, rowIndex);
+                hoveredMaterial = material;
+                hoveredRowIndex = rowIndex;
             }
         }
     }
@@ -387,7 +417,10 @@ public sealed partial class Plugin
     private void DrawCompact()
     {
         if (!windowOpen)
+        {
+            UpdateCompactHover(null, -1, new List<ModelEntry>());
             return;
+        }
 
         // Keep the existing incremental geometry workflow.
         ProcessGeometryStep();
@@ -460,6 +493,7 @@ public sealed partial class Plugin
 
         if (!visible)
         {
+            UpdateCompactHover(null, -1, new List<ModelEntry>());
             ImGui.End();
             ImGui.PopStyleVar();
             return;
@@ -550,7 +584,7 @@ public sealed partial class Plugin
                 "No outfit materials matched. " +
                 "Open Advanced for resource diagnostics.");
 
-            DrawCompactAdvanced(new List<ModelEntry>());
+            UpdateCompactHover(null, -1, new List<ModelEntry>()); DrawCompactAdvanced(new List<ModelEntry>());
 
             if (fitWindowRequested)
                 FitCompactWindow(ImGui.GetCursorPosY() + 20f);
@@ -601,22 +635,24 @@ public sealed partial class Plugin
 
         ImGui.Spacing();
 
-        if (isoOriginal != 0)
-        {
-            ImGui.TextDisabled(isoStatus);
+        ImGui.TextDisabled(
+            isoOriginal != 0 ||
+            isoStatus.StartsWith(
+                "Highlight failed:", StringComparison.Ordinal)
+                ? isoStatus
+                : "Hover a dye row to highlight it (max. 8s).");
 
-            if (ImGui.SmallButton(
-                "Restore now##ADRICompactRestore"))
-                StopMaterialIsolation("Original texture restored.");
-        }
-        else if (isoStatus.StartsWith(
-            "Highlight failed:", StringComparison.Ordinal))
-        {
-            ImGui.TextWrapped(isoStatus);
-        }
+        ImGui.BeginDisabled(isoOriginal == 0);
+        if (ImGui.SmallButton(
+            "Restore now##ADRICompactRestore"))
+            StopMaterialIsolation("Original texture restored.");
+        ImGui.EndDisabled();
 
         float resultsStartY = ImGui.GetCursorPosY();
         float resultsContentHeight = 0f;
+
+        MaterialEntry? hoveredMaterial = null;
+        int hoveredRowIndex = -1;
 
         if (ImGui.BeginChild(
             "##ADRICompactResults",
@@ -632,15 +668,19 @@ public sealed partial class Plugin
             {
                 for (int i = 0; i < materials.Count; i++)
                 {
-                    DrawCompactMaterial(materials[i], i, selectedModels);
+                    DrawCompactMaterial(materials[i], i, ref hoveredMaterial, ref hoveredRowIndex);
                 }
             }
 
-            DrawCompactAdvanced(selectedModels);
+            UpdateCompactHover(hoveredMaterial, hoveredRowIndex, selectedModels); DrawCompactAdvanced(selectedModels);
 
             // Child-local position includes content below
             // the currently visible scroll area.
             resultsContentHeight = ImGui.GetCursorPosY();
+        }
+        else
+        {
+            UpdateCompactHover(null, -1, selectedModels);
         }
 
         ImGui.EndChild();
