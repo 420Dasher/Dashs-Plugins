@@ -180,11 +180,11 @@
     "Name":  "AdvancedDyeRowInspector",
     "InternalName":  "AdvancedDyeRowInspector",
     "AssemblyVersion":  "0.0.0.0",
-    "TestingAssemblyVersion":  "0.0.3.35",
+    "TestingAssemblyVersion":  "0.0.3.36",
     "Description":  "Read-only inspector for loaded character models, materials and candidate ID textures. Exact colorset row identification is planned for later development.",
     "Punchline":  "Inspect the materials behind your outfit.",
     "Changelog":  "Initial testing-only build.",
-    "TestingChangelog": "DEV8 Stage 2N-A1: Added read-only Glamourer Advanced Dye window detection with open/close event counters and diagnostic status display. Automatic scanning remains disabled.",
+    "TestingChangelog": "DEV8 Stage 2N-A2: Automatic ADRI opening and scanning when Glamourer Advanced Dyes opens, automatic closing with safe restoration, independent manual control, and removal of temporary detection counters.",
     "ApplicableVersion":  "any",
     "Tags":  [
                  "glamour",
@@ -204,6 +204,6 @@
     "DownloadLinkInstall":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkUpdate":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkTesting":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
-    "LastUpdate":  1795575324
+    "LastUpdate":  1795575796
 }
 ]
