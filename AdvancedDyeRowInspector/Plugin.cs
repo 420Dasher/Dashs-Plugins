@@ -99,7 +99,8 @@ public sealed partial class Plugin : IDalamudPlugin
                 UpdateCompactHover(
                     null, -1, new List<ModelEntry>());
 
-                scanned = false;
+                pendingOutfitSignature = null;
+                dyeOpeningCheck = true;
                 dyeScanPending = true;
                 dyeScanDueUtc =
                     DateTime.UtcNow.AddMilliseconds(150);
@@ -130,19 +131,84 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void RunPendingGlamourerDyeScan()
     {
-        if (!dyeScanPending)
-            return;
-
         if (!dyePopupOpen || !windowOpen)
         {
             dyeScanPending = false;
+            pendingOutfitSignature = null;
             return;
         }
 
-        if (DateTime.UtcNow < dyeScanDueUtc)
+        DateTime now = DateTime.UtcNow;
+
+        if (!dyeScanPending)
+        {
+            if (now < nextOutfitCheckUtc)
+                return;
+
+            dyeScanPending = true;
+            dyeScanDueUtc = now.AddMilliseconds(150);
+        }
+
+        if (now < dyeScanDueUtc)
             return;
 
         dyeScanPending = false;
+        nextOutfitCheckUtc =
+            now.AddMilliseconds(OutfitCheckIntervalMs);
+
+        var actor = Objects.LocalPlayer;
+        nint actorAddress = actor?.Address ?? 0;
+        string? current = ReadLiveOutfitSignature();
+
+        if (!scanned || actorAddress != scannedActorAddress)
+        {
+            dyeOpeningCheck = false;
+            pendingOutfitSignature = null;
+            UpdateCompactHover(null, -1, new List<ModelEntry>());
+            Scan();
+            return;
+        }
+
+        if (current == null)
+        {
+            pendingOutfitSignature = null;
+
+            // Without a verifiable fingerprint, fall back
+            // to one scan when Advanced Dye opens.
+            if (dyeOpeningCheck)
+            {
+                dyeOpeningCheck = false;
+                Scan();
+            }
+
+            return;
+        }
+
+        dyeOpeningCheck = false;
+
+        if (string.Equals(
+            current, scannedOutfitSignature,
+            StringComparison.OrdinalIgnoreCase))
+        {
+            pendingOutfitSignature = null;
+            return;
+        }
+
+        // Require two matching observations of a changed
+        // resource snapshot before rebuilding the scan.
+        if (!string.Equals(
+            current, pendingOutfitSignature,
+            StringComparison.OrdinalIgnoreCase))
+        {
+            pendingOutfitSignature = current;
+            dyeScanPending = true;
+            dyeScanDueUtc =
+                now.AddMilliseconds(OutfitChangeSettleMs);
+            return;
+        }
+
+        pendingOutfitSignature = null;
+        UpdateCompactHover(null, -1, new List<ModelEntry>());
         Scan();
     }
 
@@ -826,6 +892,8 @@ public sealed partial class Plugin : IDalamudPlugin
             actorName = "Unavailable";
             actorIndex = "-";
             status = "Log into a character before scanning.";
+            scannedActorAddress = 0;
+            scannedOutfitSignature = null;
             return;
         }
 
@@ -881,6 +949,8 @@ public sealed partial class Plugin : IDalamudPlugin
         {
             status = "No inspectable resources. Check IPC status.";
         }
+
+        RememberScannedAppearance(actor.Address);
     }
 
     // ---------------------------------------------------------
@@ -892,7 +962,7 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 2N-A2");
+        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 2N-B");
         sb.AppendLine("Version: " + PluginBuildVersion);
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
