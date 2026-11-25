@@ -102,8 +102,7 @@ public sealed partial class Plugin
         if (mesh.VertexCount == 0 || mesh.IndexCount == 0)
             return result;
 
-        if (mesh.VertexCount > 65536 ||
-            mesh.IndexCount > 240000)
+        if (mesh.IndexCount > 240000)
         {
             throw new InvalidDataException(
                 "Spatial mesh safety limit exceeded.");

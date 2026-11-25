@@ -57,12 +57,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private bool windowOpen;
     private bool scanned;
 
-    private bool outfitOnly = true;
-    private bool showPaths;
-    private bool showRaw;
-    private bool showDependencies;
-    private bool showAllRows;
-    private float minimumCoverage = 0.25f;
+
 
     private string actorName = "Not scanned";
     private string actorIndex = "-";
@@ -181,7 +176,7 @@ public sealed partial class Plugin : IDalamudPlugin
         Pi.UiBuilder.OpenMainUi += Open;
         Pi.UiBuilder.OpenConfigUi += Open;
 
-        Log.Information("Advanced Dye Row Inspector DEV8 Stage 1 initialized.");
+        Log.Information("Advanced Dye Row Inspector initialized.");
     }
 
     private void OnCommand(string command, string arguments)
@@ -506,46 +501,13 @@ public sealed partial class Plugin : IDalamudPlugin
         }
     }
 
-    private RowStat[] SelectedRows(DecodeResult? result)
-    {
-        if (result == null || !result.Success)
-            return Array.Empty<RowStat>();
-
-        var ranked = result.Stats
-            .Where(x => showAllRows
-                ? x.TotalPercent > 0
-                : x.StrictPercent >= minimumCoverage)
-            .OrderByDescending(x => x.StrictPercent)
-            .ThenByDescending(x => x.OffGridPercent);
-
-        return showAllRows
-            ? ranked.ToArray()
-            : ranked.Take(10).ToArray();
-    }
 
     private static bool IsOutfitMaterial(MaterialEntry material)
     {
         return IsOutfit(material.GamePath);
     }
 
-    private int SharedTextureLinks(DecodeResult result)
-    {
-        return models
-            .SelectMany(x => x.Materials)
-            .Concat(orphans)
-            .Count(m => m.Textures.Any(t =>
-                t.IsId &&
-                ReferenceEquals(t.Decoded, result)));
-    }
 
-    private static int RowOrder(string row)
-    {
-        if (row.Length < 2 ||
-            !int.TryParse(row[..^1], out int number))
-            return int.MaxValue;
-
-        return number * 2 + (row.EndsWith("B") ? 1 : 0);
-    }
 
     private void Visit(
         JObject node,
@@ -823,7 +785,7 @@ public sealed partial class Plugin : IDalamudPlugin
         if (models.Count == 0 && flat.Count > 0)
         {
             status += " Tree relationships unavailable; using DEV1 path diagnostics.";
-            showRaw = true;
+
         }
         else if (models.Count == 0 && flat.Count == 0)
         {
@@ -835,26 +797,12 @@ public sealed partial class Plugin : IDalamudPlugin
     // CLIPBOARD / DIAGNOSTICS
     // ---------------------------------------------------------
 
-    private IEnumerable<string> LinkedRows()
-    {
-        return models
-            .Where(x => !outfitOnly || x.IsOutfit)
-            .SelectMany(x => x.Materials)
-            .Where(m => !outfitOnly ||
-                showDependencies || IsOutfitMaterial(m))
-            .SelectMany(x => x.Textures)
-            .Where(x => x.IsId && x.Decoded?.Success == true)
-            .SelectMany(x => SelectedRows(x.Decoded))
-            .Select(x => x.Row)
-            .Distinct()
-            .OrderBy(RowOrder);
-    }
 
     private string MakeDiagnostics()
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 2M");
+        sb.AppendLine("Advanced Dye Row Inspector - DEV8 STAGE 2M CLEANUP");
         sb.AppendLine("Version: " + PluginBuildVersion);
         sb.AppendLine("Time: " + scanTime.ToString("O"));
         sb.AppendLine("Actor: " + actorName);
@@ -951,259 +899,6 @@ public sealed partial class Plugin : IDalamudPlugin
     // IMGUI
     // ---------------------------------------------------------
 
-    private static void DrawPath(string label, string path)
-    {
-        ImGui.TextWrapped(label + ": " +
-            (string.IsNullOrWhiteSpace(path) ? "(unavailable)" : path));
-    }
-
-    private void DrawTexture(TextureEntry texture)
-    {
-        ImGui.BulletText(
-            texture.IsId
-                ? "ID texture: " + DisplayName(texture.GamePath)
-                : "Texture: " + DisplayName(texture.GamePath));
-
-        ImGui.Indent();
-
-        if (showPaths)
-        {
-            DrawPath("Game", texture.GamePath);
-            DrawPath("Resolved", texture.ActualPath);
-        }
-
-        if (texture.IsId)
-        {
-            var result = texture.Decoded;
-
-            if (result?.Success == true)
-            {
-                ImGui.TextDisabled(
-                    $"{result.Width}x{result.Height} | " +
-                    "Texture-wide, NOT mesh-UV confirmed.");
-
-                int links = SharedTextureLinks(result);
-
-                if (links > 1)
-                {
-                    ImGui.TextDisabled(
-                        $"Shared decoded ID source: " +
-                        $"{links} linked material nodes.");
-                }
-
-                int pixelCount = result.Width * result.Height;
-
-                ImGui.TextDisabled(
-                    $"Red-channel quality: " +
-                    $"{result.ExactPixels:N0} exact, " +
-                    $"{result.NearPixels:N0} near-palette, " +
-                    $"{result.ApproximatePixels:N0} off-grid " +
-                    $"of {pixelCount:N0} pixels.");
-
-                var selected = SelectedRows(result);
-
-                if (selected.Length == 0)
-                {
-                    ImGui.TextDisabled(
-                        "No clean-channel rows above threshold.");
-                }
-                else
-                {
-                    ImGui.TextUnformatted(
-                        $"Highest texture coverage ({selected.Length} shown):");
-
-                    foreach (var row in selected)
-                    {
-                        ImGui.TextWrapped(
-                            $"{row.Row}: " +
-                            $"{row.StrictPercent:F2}% clean + " +
-                            $"{row.OffGridPercent:F2}% off-grid estimate");
-                    }
-                }
-
-                if (!showAllRows &&
-                    result.Rows.Length > selected.Length)
-                {
-                    ImGui.TextDisabled(
-                        $"{result.Rows.Length - selected.Length} " +
-                        "additional rows available through Show all rows.");
-                }
-
-                ImGui.TextDisabled(
-                    "Coverage is texture-wide, not visible-mesh coverage.");
-            }
-            else
-            {
-                ImGui.TextWrapped(
-                    "Rows unavailable: " +
-                    (result?.Detail ?? "No decoded data."));
-            }
-        }
-
-        ImGui.Unindent();
-    }
-
-    private void DrawMaterial(MaterialEntry material, int index)
-    {
-        string name = nativeMaterialIndices.ContainsKey(material)
-            ? NativeMaterialDisplayName(material) +
-              " - " + DisplayName(material.GamePath)
-            : DisplayName(material.GamePath);
-
-        if (!ImGui.TreeNode(
-            $"{name}##mat_{index}_{material.GetHashCode()}"))
-            return;
-
-        DrawPath("Material", material.GamePath);
-        DrawUvReport(material);
-
-        if (showPaths)
-            DrawPath("Resolved", material.ActualPath);
-
-        var ids = material.Textures.Where(x => x.IsId).ToList();
-
-        if (ids.Count == 0)
-        {
-            ImGui.TextDisabled(
-                "No ID texture linked by Penumbra resource tree.");
-        }
-        else
-        {
-            var rows = ids
-                .Where(x => x.Decoded?.Success == true)
-                .SelectMany(x => SelectedRows(x.Decoded))
-                .Select(x => x.Row)
-                .Distinct()
-                .OrderBy(RowOrder)
-                .ToArray();
-
-            if (rows.Length > 0)
-            {
-                ImGui.TextWrapped(
-                    "Highlighted rows: " + string.Join(", ", rows));
-
-                ImGui.TextDisabled(
-                    "Ranked by texture coverage; not UV-confirmed.");
-
-                if (ImGui.SmallButton(
-                    $"Copy Highlighted Rows##copy_{index}_{material.GetHashCode()}"))
-                {
-                    ImGui.SetClipboardText(string.Join(", ", rows));
-                }
-            }
-            else
-            {
-                ImGui.TextDisabled(
-                    "No rows above threshold, or decoder unavailable.");
-            }
-        }
-
-        foreach (var texture in material.Textures)
-        {
-            if (texture.IsId || showPaths)
-                DrawTexture(texture);
-        }
-
-        ImGui.TreePop();
-    }
-
-    private void DrawModel(ModelEntry model, int index)
-    {
-        string name = DisplayName(model.GamePath);
-
-        if (!ImGui.TreeNode($"{name}##model_{index}"))
-            return;
-
-        DrawPath("Model", model.GamePath);
-        DrawUvModelStatus(model);
-
-        if (showPaths)
-            DrawPath("Resolved", model.ActualPath);
-
-        var outfitMaterials = model.Materials
-            .Where(IsOutfitMaterial)
-            .ToList();
-
-        var dependencies = model.Materials
-            .Where(m => !IsOutfitMaterial(m))
-            .ToList();
-
-        if (outfitMaterials.Count == 0)
-        {
-            ImGui.TextDisabled(
-                "No equipment/accessory materials directly classified.");
-        }
-        else
-        {
-            ImGui.TextUnformatted(
-                $"Outfit materials ({outfitMaterials.Count})");
-
-            for (int i = 0; i < outfitMaterials.Count; i++)
-                DrawMaterial(outfitMaterials[i], i);
-        }
-
-        if (dependencies.Count > 0)
-        {
-            if (!outfitOnly || showDependencies)
-            {
-                if (ImGui.TreeNode(
-                    $"Body / other dependencies ({dependencies.Count})##deps_{index}"))
-                {
-                    ImGui.TextDisabled(
-                        "Other linked materials; may include " +
-                        "body meshes, connectors or garment dependencies.");
-
-                    for (int i = 0; i < dependencies.Count; i++)
-                        DrawMaterial(dependencies[i], i + 1000);
-
-                    ImGui.TreePop();
-                }
-            }
-            else
-            {
-                ImGui.TextDisabled(
-                    $"{dependencies.Count} body/other materials hidden.");
-            }
-        }
-
-        ImGui.TreePop();
-    }
-
-    private void DrawRaw()
-    {
-        if (!ImGui.CollapsingHeader(
-            $"Raw resources ({flat.Count})###ADRIRaw"))
-            return;
-
-        ImGui.TextDisabled(
-            "Path-only snapshot. Entries here are not model/material links.");
-
-        foreach (string slot in SlotOrder)
-        {
-            var entries = flat
-                .Where(x => x.Slot == slot)
-                .Where(x => !outfitOnly ||
-                    IsOutfit(x.GamePath))
-                .ToList();
-
-            if (entries.Count == 0)
-                continue;
-
-            if (!ImGui.TreeNode(
-                $"{slot} ({entries.Count})##raw_{slot}"))
-                continue;
-
-            foreach (var entry in entries)
-            {
-                ImGui.BulletText(entry.Kind);
-                DrawPath("Game", entry.GamePath);
-                DrawPath("Resolved", entry.ActualPath);
-                ImGui.Spacing();
-            }
-
-            ImGui.TreePop();
-        }
-    }
 
     private void Draw()
     {

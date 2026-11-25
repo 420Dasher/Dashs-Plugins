@@ -208,34 +208,6 @@ public sealed partial class Plugin
         }
     }
 
-    private void RecordCappedMesh(
-        ModelEntry model,
-        MdlFile mdl,
-        int meshIndex,
-        string reason)
-    {
-        string materialName = "(unresolved)";
-
-        try
-        {
-            materialName = ReadMaterialName(
-                mdl, mdl.Meshes[meshIndex].MaterialIndex);
-        }
-        catch
-        {
-            // Preserve the safety-budget classification.
-        }
-
-        MarkMaterialIncomplete(model, mdl, meshIndex);
-
-        RecordMeshIssue(
-            model,
-            meshIndex,
-            "UV safety-budget omission",
-            materialName,
-            reason + "; geometry structure was audited, " +
-            "but this mesh was not UV-rasterized.");
-    }
 
     private void AppendStructureAudit(StringBuilder sb)
     {

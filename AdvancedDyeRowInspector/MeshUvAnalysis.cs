@@ -948,15 +948,6 @@ public sealed partial class Plugin
     // UI
     // ======================================================
 
-    private void DrawUvModelStatus(ModelEntry model)
-    {
-        if (uvModelStatus.TryGetValue(
-            model, out var message))
-        {
-            ImGui.TextDisabled(
-                "Experimental mesh parse: " + message);
-        }
-    }
 
     private void DrawUvReport(MaterialEntry material)
     {
@@ -1063,38 +1054,6 @@ public sealed partial class Plugin
             "visibility are not yet verified.");
     }
 
-    private void DrawUvControls()
-    {
-        ImGui.TextDisabled(
-            $"Geometry scan: {uvProcessedModels}/{uvTotalModels} models processed; " +
-            $"{pendingUvModels.Count} pending.");
-        ImGui.TextDisabled(
-            "DEV8: experimental 256x256 UV coverage " +
-            "(rescan after UV changes).");
-
-        ImGui.Checkbox(
-            "Flip UV V (rescan required)", ref flipUvV);
-
-        ImGui.SliderFloat(
-            "Minimum UV sample influence (%)",
-            ref minimumUvPercent,
-            0.0f,
-            10.0f,
-            "%.2f%%");
-
-        ImGui.TextDisabled(
-            $"UV: {uvMatchedModels} model(s), " +
-            $"{uvMatchedMeshes} complete meshes, " +
-            $"{uvUnmatchedMeshes} incomplete/unresolved.");
-        ImGui.TextDisabled(
-            $"Non-outfit: {uvKnownNonOutfitMeshes}, " +
-            $"empty: {uvEmptyMeshes}, " +
-            $"race-variant links: {uvRaceVariantLinks}.");
-        ImGui.TextDisabled(
-            $"Triangles: {uvTriangles:N0} rasterized, " +
-            $"{uvTriangleAttempts:N0} attempted; " +
-            $"per-model allowance {uvModelTriangleBudget:N0}.");
-    }
 
     // ======================================================
     // DIAGNOSTICS

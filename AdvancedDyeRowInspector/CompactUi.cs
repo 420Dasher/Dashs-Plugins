@@ -53,7 +53,7 @@ public sealed partial class Plugin
     {
         return models
             .Where(m => m.Slot == slot)
-            .Where(m => !outfitOnly || m.IsOutfit)
+            .Where(m => m.IsOutfit)
             .Where(m => m.Materials.Any(IsOutfitMaterial))
             .ToList();
     }
@@ -168,8 +168,7 @@ public sealed partial class Plugin
                 string.Join(", ", sharedSlots));
         }
 
-        if (compactAdvanced && showPaths)
-            ImGui.TextWrapped(material.GamePath);
+        if (compactAdvanced) ImGui.TextWrapped(material.ActualPath);
 
         if (pendingUvModels.Count > 0)
         {
@@ -204,161 +203,93 @@ public sealed partial class Plugin
             return;
         }
 
-        ImGui.TextDisabled(
-            "UV candidates (visibility not verified):");
+        ImGui.TextDisabled("UV candidate rows");
 
-        foreach (var row in rows)
+        int columns = ImGui.GetContentRegionAvail().X >= 520f ? 3 :
+            ImGui.GetContentRegionAvail().X >= 330f ? 2 : 1;
+
+        if (ImGui.BeginTable(
+            $"##ADRICompactRows_{index}", columns,
+            ImGuiTableFlags.SizingStretchSame |
+            ImGuiTableFlags.NoSavedSettings))
         {
-            int number = int.Parse(row.Row[..^1]);
-            int rowIndex = (number - 1) * 2 +
-                (row.Row[^1] == 'B' ? 1 : 0);
-
-            ImGui.Selectable(
-                $"Row {row.Row} ({row.Percent:F1}% UV)##ADRIHover_{index}_{rowIndex}");
-
-            if (ImGui.IsItemHovered())
+            foreach (var row in rows)
             {
-                hoveredMaterial = material;
-                hoveredRowIndex = rowIndex;
+                int number = int.Parse(row.Row[..^1]);
+                int rowIndex = (number - 1) * 2 +
+                    (row.Row[^1] == 'B' ? 1 : 0);
+
+                ImGui.TableNextColumn();
+                ImGui.Selectable(
+                    $"{row.Row}   {row.Percent:F1}% UV##ADRIHover_{index}_{rowIndex}");
+
+                if (ImGui.IsItemHovered())
+                {
+                    hoveredMaterial = material;
+                    hoveredRowIndex = rowIndex;
+                }
             }
+            ImGui.EndTable();
         }
     }
 
-    private void DrawCompactAdvanced(
-        List<ModelEntry> selectedModels)
+    private void DrawCompactAdvanced(List<ModelEntry> selectedModels)
     {
         if (!compactAdvanced)
             return;
 
         ImGui.Separator();
-        ImGui.TextDisabled("Advanced");
 
-        if (ImGui.TreeNode(
-            "Display / sampling options"))
+        if (ImGui.TreeNode("Detection options"))
         {
-            ImGui.Checkbox(
-                "Show paths", ref showPaths);
-
-            ImGui.SameLine();
-
-            ImGui.Checkbox(
-                "Outfit only", ref outfitOnly);
-
-            ImGui.Checkbox(
-                "Body / other dependencies",
-                ref showDependencies);
-
-            ImGui.SameLine();
-
-            ImGui.Checkbox(
-                "Raw resources", ref showRaw);
-
-            ImGui.Checkbox(
-                "All texture rows", ref showAllRows);
-
-            if (!showAllRows)
-            {
-                ImGui.SliderFloat(
-                    "Min. clean texture coverage (%)",
-                    ref minimumCoverage,
-                    0f, 2f, "%.2f%%");
-            }
-
             ImGui.SliderFloat(
-                "Min. UV influence (%)",
-                ref minimumUvPercent,
-                0f, 10f, "%.2f%%");
+                "Minimum UV influence (%)",
+                ref minimumUvPercent, 0f, 10f, "%.2f%%");
 
             ImGui.Checkbox(
-                "Flip UV V (rescan required)",
-                ref flipUvV);
+                "Flip UV V (rescan required)", ref flipUvV);
 
             ImGui.TreePop();
         }
 
-        if (ImGui.TreeNode(
-            "Troubleshooting / developer tools"))
+        if (ImGui.TreeNode("Diagnostics"))
         {
             ImGui.TextDisabled(
-                $"Geometry: {uvProcessedModels}/" +
-                $"{uvTotalModels} models, " +
-                $"{uvMatchedMeshes} matched meshes, " +
-                $"{uvUnmatchedMeshes} unmatched");
-
-            ImGui.TextDisabled(
-                $"Triangles rasterized: {uvTriangles:N0}");
-
-            DrawMeshIssueDiagnostics();
-
-            if (ImGui.TreeNode(
-                "Experimental UV sampling (developer only)"))
-            {
-                ImGui.TextDisabled(
-                    "256x256 UV mask coverage only; " +
-                    "not verified dye-row coverage.");
-
-                foreach (var material in
-                    CompactMaterials(compactSlot))
-                {
-                    ImGui.Separator();
-
-                    ImGui.TextUnformatted(
-                        FriendlyMaterialName(material.GamePath));
-
-                    DrawUvReport(material);
-                }
-
-                ImGui.TreePop();
-            }
-
+                $"Geometry: {uvProcessedModels}/{uvTotalModels} models, " +
+                $"{uvMatchedMeshes} matched meshes.");
             ImGui.TextDisabled(nativeMaterialLabelStatus);
 
-            DrawMaterialAudit(selectedModels);
-            DrawActiveGeometryAudit(selectedModels);
-            DrawSpatialGeometryAudit(selectedModels);
-            DrawMaterialIsolation(selectedModels);
+            if (ImGui.Button("Copy full diagnostics"))
+                ImGui.SetClipboardText(MakeDiagnostics());
 
-            if (ImGui.TreeNode("Connection details"))
+            if (ImGui.TreeNode("Material UV details"))
             {
-                ImGui.TextWrapped(
-                    $"Penumbra: {treeStatus}");
-
-                ImGui.TextWrapped(
-                    $"Resource paths: {pathStatus}");
-
-                ImGui.TextWrapped(
-                    $"Glamourer: {glamourerStatus}");
-
-                ImGui.TreePop();
-            }
-
-            if (ImGui.SmallButton(
-                "Copy full diagnostics"))
-            {
-                ImGui.SetClipboardText(
-                    MakeDiagnostics());
-            }
-
-            if (ImGui.TreeNode(
-                "Detailed models and textures"))
-            {
-                for (int i = 0;
-                     i < selectedModels.Count;
-                     i++)
+                foreach (var material in CompactMaterials(compactSlot))
                 {
-                    DrawModel(selectedModels[i], i);
+                    ImGui.Separator();
+                    ImGui.TextUnformatted(
+                        NativeMaterialDisplayName(material));
+                    DrawUvReport(material);
                 }
-
                 ImGui.TreePop();
             }
 
-            if (showRaw)
-                DrawRaw();
+            if (ImGui.TreeNode("Developer audits"))
+            {
+                DrawMeshIssueDiagnostics();
+                DrawMaterialAudit(selectedModels);
+                DrawActiveGeometryAudit(selectedModels);
+                DrawSpatialGeometryAudit(selectedModels);
 
+                ImGui.TextWrapped("Penumbra: " + treeStatus);
+                ImGui.TextWrapped("Paths: " + pathStatus);
+                ImGui.TextWrapped("Glamourer: " + glamourerStatus);
+
+                ImGui.TreePop();
+            }
             ImGui.TreePop();
         }
     }
-
     private static float PreferredCompactWidth(
         float screenWidth)
     {
@@ -504,36 +435,21 @@ public sealed partial class Plugin
 
         ImGui.Spacing();
 
-        if (ImGui.Button("Scan outfit"))
-        {
+        if (ImGui.Button("Scan outfit", new Vector2(114f, 0f)))
             Scan();
-        }
 
         ImGui.SameLine();
-
-
-
-        if (ImGui.SmallButton(
-            compactAdvanced ? "Hide details" : "Advanced"))
-        {
+        if (ImGui.Button(
+            compactAdvanced ? "Hide details" : "Details",
+            new Vector2(108f, 0f)))
             compactAdvanced = !compactAdvanced;
-        }
 
         ImGui.SameLine();
-
         bool fitWindowRequested =
-            ImGui.SmallButton("Fit window");
+            ImGui.Button("Fit", new Vector2(56f, 0f));
 
-        ImGui.SameLine();
-
-        // ImGui collapse is reversible from the title bar.
-        // It does not unload ADRI or modify the character.
-        if (ImGui.SmallButton("Minimize"))
-        {
-            ImGui.SetWindowCollapsed(
-                true, ImGuiCond.Always);
-        }
-
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Fit window to content.");
         ImGui.Spacing();
 
         if (!scanned)
