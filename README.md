@@ -93,3 +93,10 @@ Example rotating format:
 - `/sth retry` — retry Spotify after a recoverable error
 - `/sth clear` — clear the currently applied title
 - `/sth help` — show available commands
+
+## Contributors
+
+### AI-Assisted Development
+
+**ChatGPT (OpenAI) – AI Development Collaborator**  
+Development collaboration, architecture, implementation, debugging, refactoring, testing assistance, and documentation. All AI-assisted contributions are reviewed and tested by the repository maintainer.
