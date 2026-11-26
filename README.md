@@ -98,5 +98,6 @@ Example rotating format:
 
 ### AI-Assisted Development
 
-**ChatGPT (OpenAI) – AI Development Collaborator**  
+**ChatGPT (OpenAI) – AI Development Collaborator**
+
 Development collaboration, architecture, implementation, debugging, refactoring, testing assistance, and documentation. All AI-assisted contributions are reviewed and tested by the repository maintainer.
