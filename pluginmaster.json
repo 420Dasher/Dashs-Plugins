@@ -205,37 +205,5 @@
     "DownloadLinkUpdate": "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "DownloadLinkTesting": "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/AdvancedDyeRowInspector/latest.zip",
     "LastUpdate": 1795576645
-  },
-  {
-    "Author": "Critical_Impact; fork by Dash + AI",
-    "Name": "Dash's Allagan Tools Fork",
-    "InternalName": "DashsAllaganToolsFork",
-    "AssemblyVersion": "0.0.0.0",
-    "TestingAssemblyVersion": "0.0.1.1",
-    "Description": "A performance-focused fork of Allagan Tools by Critical_Impact.\n\nBased on upstream version 15.1.1.\n\nThis testing build introduces inventory processing diagnostics to investigate gameplay stuttering caused by inventory quantity changes.\n\nOriginal inventory tracking functionality is retained.\n\nAllagan Tool's primary purpose is to keep track of items across your characters/retainers/free company. With it's filter system you'll never lose track of items or not know where they should be sorted.\n\nWhile this is it's primary purpose, it has quite an exhaustive list of other features including:\n\t- Craft planning\n\t- Market board integration\n\t- Item highlighting in inventories when searching/sorting and picking ingredients for crafts\n\t- Item window that includes vendor and source information among other things\n\t- Duty/mob/airship/submarine windows that are fully searchable\n\t- A filtering system that lets you setup complex searches for specific items \n\t- Tooltip integration that'll let you see where the items are on hover",
-    "Punchline": "A performance-focused fork of Allagan Tools.",
-    "RepoUrl": "https://github.com/420Dasher/DashsAllaganToolsFork",
-    "IconUrl": "https://raw.githubusercontent.com/Critical-Impact/InventoryTools/main/InventoryTools/Images/icon.png",
-    "ApplicableVersion": "any",
-    "Tags": [
-      "inventory",
-      "utility",
-      "performance"
-    ],
-    "DalamudApiLevel": 15,
-    "TestingDalamudApiLevel": 15,
-    "LoadRequiredState": 0,
-    "LoadSync": false,
-    "CanUnloadAsync": false,
-    "LoadPriority": 0,
-    "AcceptsFeedback": false,
-    "IsHide": false,
-    "IsTestingExclusive": true,
-    "Changelog": "Initial testing-exclusive fork.",
-    "TestingChangelog": "DEV3: Extended performance diagnostics with rolling framework frame-time measurements, freeze and recovery analysis, garbage collection statistics, allocation tracking, inventory save timing, and deferred list, table and configuration processing timings.",
-    "DownloadLinkInstall": "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/DashsAllaganToolsFork/latest.zip",
-    "DownloadLinkUpdate": "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/DashsAllaganToolsFork/latest.zip",
-    "DownloadLinkTesting": "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/DashsAllaganToolsFork/latest.zip",
-    "LastUpdate": 1795786832
   }
 ]
