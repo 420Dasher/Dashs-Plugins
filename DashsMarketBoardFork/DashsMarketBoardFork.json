@@ -1,0 +1,22 @@
+{
+  "Author": "Dash + AI (original by fmauNeko)",
+  "Name": "DashsMarketBoardFork",
+  "InternalName": "DashsMarketBoardFork",
+  "AssemblyVersion": "0.1.0.0",
+  "DalamudApiLevel": 15,
+  "ApplicableVersion": "any",
+  "LoadRequiredState": 0,
+  "LoadSync": false,
+  "CanUnloadAsync": false,
+  "LoadPriority": 0,
+  "Punchline": "Your reliable Market Board companion.",
+  "Description": "A maintained fork of fmauNeko's Market Board plugin focused on reliable Universalis listings and accurate cross-world market information. /dmbf to open.",
+  "RepoUrl": "https://github.com/420Dasher/Dashs-Plugins",
+  "Tags": [
+    "market",
+    "market board",
+    "universalis",
+    "shopping",
+    "utility"
+  ]
+}

@@ -173,5 +173,37 @@
     "DownloadLinkInstall":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/MarketRun/latest.zip",
     "DownloadLinkUpdate":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/MarketRun/latest.zip",
     "DownloadLinkTesting":  "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/MarketRun/latest.zip"
+},
+{
+  "Author": "Dash + AI (original by fmauNeko)",
+  "Name": "DashsMarketBoardFork",
+  "InternalName": "DashsMarketBoardFork",
+  "AssemblyVersion": "0.0.0.0",
+  "TestingAssemblyVersion": "0.1.0.0",
+  "Description": "A maintained fork of fmauNeko's Market Board plugin focused on reliable Universalis listings and accurate cross-world market information. /dmbf to open.",
+  "Punchline": "Your reliable Market Board companion.",
+  "Changelog": "Testing-exclusive development.",
+  "TestingChangelog": "DEV1: Initial upstream integration and market diagnostics.",
+  "ApplicableVersion": "any",
+  "Tags": [
+    "market",
+    "market board",
+    "universalis",
+    "shopping",
+    "utility"
+  ],
+  "IconUrl": "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/DashsMarketBoardFork/images/icon.png",
+  "DalamudApiLevel": 15,
+  "TestingDalamudApiLevel": 15,
+  "LoadRequiredState": 0,
+  "LoadSync": false,
+  "CanUnloadAsync": false,
+  "LoadPriority": 0,
+  "AcceptsFeedback": false,
+  "IsHide": false,
+  "IsTestingExclusive": true,
+  "DownloadLinkInstall": "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/DashsMarketBoardFork/latest.zip",
+  "DownloadLinkUpdate": "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/DashsMarketBoardFork/latest.zip",
+  "DownloadLinkTesting": "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/DashsMarketBoardFork/latest.zip"
 }
 ]
