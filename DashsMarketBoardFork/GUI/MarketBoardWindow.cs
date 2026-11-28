@@ -52,7 +52,9 @@ namespace MarketBoardPlugin.GUI
 
     private readonly IFontHandle titleFontHandle;
 
-    private readonly Dictionary<uint, MarketDataResponse> marketDataCache;
+    private readonly Dictionary<
+        (uint ItemId, string Scope, bool IncludeOceania, int Listings, int History),
+        MarketDataResponse> marketDataCache;
 
     private readonly string[] categoryLabels = new[] { "All", "Weapons", "Equipments", "Others", "Furniture" };
 
@@ -91,6 +93,14 @@ namespace MarketBoardPlugin.GUI
 
     private ulong playerId;
 
+    private uint currentWorldId;
+
+    private volatile DataCenter[] dataCenters = [];
+
+    private DataCenter[]? appliedDataCenters;
+
+    private (uint ItemId, string Scope, bool IncludeOceania, int Listings, int History) pendingMarketKey;
+
     private int minQuantityFilter;
 
     private int selectedWorld = -1;
@@ -107,11 +117,11 @@ namespace MarketBoardPlugin.GUI
 
     private List<KeyValuePair<ItemSearchCategory, List<Item>>> enumerableCategoriesAndItems = new();
 
-    private Task? currentRefreshTask;
+    private Task<MarketDataResponse?>? currentRefreshTask;
 
     private CancellationTokenSource? currentRefreshCancellationTokenSource;
 
-    private bool isUniversalisUp;
+    private volatile bool isUniversalisUp;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MarketBoardWindow"/> class.
@@ -599,12 +609,15 @@ namespace MarketBoardPlugin.GUI
         {
           ImGui.SetNextItemWidth(250 * scale);
           ImGui.Text(
-            $"Fetching data from Universalis...");
+            this.selectedWorld < 0
+                ? "Waiting for Universalis world metadata..."
+                : this.currentRefreshTask != null
+                    ? "Fetching data from Universalis..."
+                    : "No market data available.");
           ImGui.SetCursorPosY(ImGui.GetCursorPosY() + ImGui.GetTextLineHeight() - ImGui.GetTextLineHeightWithSpacing());
         }
 
-        if (this.marketData != null
-            && this.currentRefreshTask?.IsCompleted == true)
+        if (this.marketData != null)
         {
           if (ImGui.Button("Copy Market Diagnostics"))
           {
@@ -696,11 +709,11 @@ namespace MarketBoardPlugin.GUI
 
                 if (this.selectedWorld <= 1)
                 {
-                  retainerSB.Append(CultureInfo.CurrentCulture, $" {listing.WorldName}");
+                  retainerSB.Append(CultureInfo.CurrentCulture, $" {listing.WorldName ?? "Unknown world"}");
 
-                  if (this.selectedWorld == 0)
+                  if (listing.WorldID.HasValue)
                   {
-                    retainerSB.Append(CultureInfo.CurrentCulture, $" @ {this.GetDcNameFromWorldId(listing.WorldID!.Value)}");
+                    retainerSB.Append(CultureInfo.CurrentCulture, $" @ {this.GetDcNameFromWorldId(listing.WorldID.Value)}");
                   }
                 }
                 else
@@ -1071,63 +1084,112 @@ namespace MarketBoardPlugin.GUI
 
     private void HandleFrameworkUpdateEvent(IFramework framework)
     {
-      if (this.plugin.PlayerState.ContentId != 0 && this.playerId != this.plugin.PlayerState.ContentId)
+      var player = this.plugin.PlayerState;
+      var characterId = player.ContentId;
+
+      if (characterId == 0 || player.CurrentWorld.RowId == 0)
       {
-        var localPlayer = this.plugin.PlayerState;
-        var currentDc = localPlayer.CurrentWorld.Value.DataCenter;
-        var dcWorlds = this.plugin.DataManager.GetExcelSheet<World>()
-          .Where(w => w.DataCenter.RowId == currentDc.RowId && w.IsPublic)
-          .OrderBy(w => w.Name.ExtractText())
-          .Select(w =>
-          {
-            string displayName = w.Name.ExtractText();
-
-            if (this.plugin.PlayerState.CurrentWorld.Value.RowId == w.RowId)
-            {
-              displayName += $" {SeIconChar.Hyadelyn.ToChar()}";
-            }
-
-            return (w.Name.ExtractText(), displayName);
-          });
-
-        var regionName = localPlayer.CurrentWorld.Value.DataCenter.Value.Region.RowId switch
+        if (this.playerId != 0 || this.selectedWorld >= 0)
         {
-          1 => "Japan",
-          2 => "North-America",
-          3 => "Europe",
-          4 => "Oceania",
-          5 => "中国",
-          _ => string.Empty,
-        };
+          this.playerId = 0;
+          this.currentWorldId = 0;
+          this.selectedWorld = -1;
+          this.worldList.Clear();
+          this.ResetMarketData();
+        }
+
+        return;
+      }
+
+      var worldId = player.CurrentWorld.RowId;
+      var centers = this.dataCenters;
+
+      var sameWorld = this.playerId == characterId
+          && this.currentWorldId == worldId;
+
+      if (!sameWorld || !ReferenceEquals(this.appliedDataCenters, centers))
+      {
+        var previousWorld = sameWorld
+            && this.selectedWorld >= 2
+            && this.selectedWorld < this.worldList.Count
+            ? this.worldList[this.selectedWorld].Item1
+            : null;
+
+        this.playerId = characterId;
+        this.currentWorldId = worldId;
+        this.appliedDataCenters = centers;
+
+        var logicalDc = centers.FirstOrDefault(
+            dc => dc.Worlds.Contains(worldId));
 
         this.worldList.Clear();
-        this.worldList.Add((regionName, $"Cross-DC {SeIconChar.CrossWorld.ToChar()}"));
-        this.worldList.Add((currentDc.Value.Name.ExtractText(), $"Cross-World {SeIconChar.CrossWorld.ToChar()}"));
-        this.worldList.AddRange(dcWorlds);
+        this.selectedWorld = -1;
 
-        if (this.plugin.Config.CrossDataCenter)
+        if (logicalDc != null
+            && !string.IsNullOrWhiteSpace(logicalDc.Region))
         {
-          this.selectedWorld = 0;
-        }
-        else if (this.plugin.Config.CrossWorld)
-        {
-          this.selectedWorld = 1;
-        }
-        else
-        {
-          this.selectedWorld = this.worldList.FindIndex(w => w.Item1 == this.plugin.PlayerState.CurrentWorld.Value.Name);
+          var region = logicalDc.Region;
+
+          var regionWorldIds = centers
+              .Where(dc => string.Equals(
+                  dc.Region, region, StringComparison.Ordinal))
+              .SelectMany(dc => dc.Worlds)
+              .ToHashSet();
+
+          var worlds = this.plugin.DataManager.GetExcelSheet<World>()
+              .Where(w => w.IsPublic && regionWorldIds.Contains(w.RowId))
+              .OrderBy(w => w.Name.ExtractText())
+              .Select(w =>
+              {
+                var name = w.Name.ExtractText();
+                var display = name;
+
+                if (w.RowId == worldId)
+                {
+                  display += $" {SeIconChar.Hydaelyn.ToChar()}";
+                }
+
+                return (name, display);
+              });
+
+          this.worldList.Add(
+              (region, $"Cross-DC {SeIconChar.CrossWorld.ToChar()}"));
+
+          this.worldList.Add(
+              (region, $"Cross-World {SeIconChar.CrossWorld.ToChar()}"));
+
+          this.worldList.AddRange(worlds);
+
+          if (this.plugin.Config.CrossDataCenter)
+          {
+            this.selectedWorld = 0;
+          }
+          else if (this.plugin.Config.CrossWorld)
+          {
+            this.selectedWorld = 1;
+          }
+          else
+          {
+            var target = previousWorld
+                ?? player.CurrentWorld.Value.Name.ExtractText();
+
+            this.selectedWorld = this.worldList.FindIndex(
+                2, w => w.Item1 == target);
+
+            if (this.selectedWorld < 0)
+            {
+              var currentName = player.CurrentWorld.Value.Name.ExtractText();
+
+              this.selectedWorld = this.worldList.FindIndex(
+                  2, w => w.Item1 == currentName);
+            }
+          }
         }
 
-        if (this.worldList.Count > 1)
-        {
-          this.playerId = this.plugin.PlayerState.ContentId;
-        }
+        this.ResetMarketData();
       }
 
-      if (this.plugin.PlayerState.ContentId == 0)
-      {
-        this.playerId = 0;
-      }
+      this.CompleteMarketRefresh();
     }
 
     private void HandleHoveredItemChange(object? sender, ulong itemId)
@@ -1159,120 +1221,172 @@ namespace MarketBoardPlugin.GUI
 
     private void RefreshMarketData()
     {
-      if (!this.selectedItem.HasValue)
+      this.currentRefreshCancellationTokenSource?.Cancel();
+      this.currentRefreshCancellationTokenSource?.Dispose();
+      this.currentRefreshCancellationTokenSource = null;
+      this.currentRefreshTask = null;
+      this.marketData = null;
+      this.selectedListing = -1;
+      this.selectedHistory = -1;
+
+      if (!this.selectedItem.HasValue
+          || this.selectedWorld < 0
+          || this.selectedWorld >= this.worldList.Count)
       {
         return;
       }
 
-      this.marketData = null;
+      var itemId = this.selectedItem.Value.RowId;
+      var scope = this.worldList[this.selectedWorld].Item1;
+      var listingCount = this.plugin.Config.ListingCount;
+      var historyCount = this.plugin.Config.HistoryCount;
 
-      if (this.currentRefreshTask?.Status != TaskStatus.RanToCompletion)
+      var includeOceania = this.selectedWorld == 0
+          && this.plugin.Config.IncludeOceaniaDC
+          && scope != "Oceania";
+
+      var key = (itemId, scope, includeOceania, listingCount, historyCount);
+
+      if (this.marketDataCache.TryGetValue(key, out var cached)
+          && DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+              - cached.FetchTimestamp < this.plugin.Config.ItemRefreshTimeout)
       {
-        this.plugin.Log.Debug("Cancelling previous refresh task.");
-        this.currentRefreshCancellationTokenSource?.Cancel();
+        this.marketData = cached;
+        return;
       }
 
-      this.currentRefreshCancellationTokenSource?.Dispose();
-      this.currentRefreshCancellationTokenSource = new CancellationTokenSource();
+      this.marketDataCache.Remove(key);
+      this.pendingMarketKey = key;
+
+      this.currentRefreshCancellationTokenSource =
+          new CancellationTokenSource();
+
+      var token = this.currentRefreshCancellationTokenSource.Token;
 
       this.currentRefreshTask = Task.Run(
-        async () =>
-        {
-          var cachedItem = this.marketDataCache.GetValueOrDefault(this.selectedItem.Value.RowId);
-          if (
-            cachedItem != default(MarketDataResponse)
-            && DateTimeOffset.Now.ToUnixTimeMilliseconds() - cachedItem.FetchTimestamp < this.plugin.Config.ItemRefreshTimeout)
+          async () =>
           {
-            this.marketData = cachedItem;
-            return;
-          }
-
-          this.marketDataCache.Remove(this.selectedItem.Value.RowId);
-
-          try
-          {
-            this.marketData = await this.plugin.UniversalisClient
-              .GetMarketData(
-                this.selectedItem.Value.RowId,
-                this.worldList[this.selectedWorld].Item1,
-                this.plugin.Config.ListingCount,
-                this.plugin.Config.HistoryCount,
-                this.currentRefreshCancellationTokenSource.Token)
-              .ConfigureAwait(false);
-
-            if (this.selectedWorld == 0 && this.plugin.Config.IncludeOceaniaDC && this.worldList[this.selectedWorld].Item1 != "Oceania")
+            try
             {
-              var oceaniaMarketData = await this.plugin.UniversalisClient
-                .GetMarketData(
-                  this.selectedItem.Value.RowId,
-                  "Oceania",
-                  this.plugin.Config.ListingCount,
-                  this.plugin.Config.HistoryCount,
-                  this.currentRefreshCancellationTokenSource.Token)
-                .ConfigureAwait(false);
+              var result = await this.plugin.UniversalisClient
+                  .GetMarketData(
+                      itemId, scope, listingCount, historyCount, token)
+                  .ConfigureAwait(false);
 
-              if (oceaniaMarketData != null)
+              if (includeOceania)
               {
-                if (this.marketData == null)
-                {
-                  this.marketData = oceaniaMarketData;
-                }
-                else
-                {
-                  foreach (var listing in oceaniaMarketData.Listings)
-                  {
-                    this.marketData.Listings.Add(listing);
-                  }
+                var oceania = await this.plugin.UniversalisClient
+                    .GetMarketData(
+                        itemId, "Oceania", listingCount, historyCount, token)
+                    .ConfigureAwait(false);
 
-                  foreach (var history in oceaniaMarketData.RecentHistory)
-                  {
-                    this.marketData.RecentHistory.Add(history);
-                  }
-
-                  this.marketData.Listings = this.marketData.Listings
+                result.Listings = result.Listings
+                    .Concat(oceania.Listings)
                     .OrderBy(l => l.PricePerUnit)
-                    .Take(this.plugin.Config.ListingCount)
+                    .Take(listingCount)
                     .ToList();
-                  this.marketData.RecentHistory = this.marketData.RecentHistory
+
+                result.RecentHistory = result.RecentHistory
+                    .Concat(oceania.RecentHistory)
                     .OrderByDescending(h => h.Timestamp)
-                    .Take(this.plugin.Config.HistoryCount)
+                    .Take(historyCount)
                     .ToList();
-                }
+
+                result.RawMarketDiagnostics +=
+                    "\n=== Additional Oceania request ===\n" +
+                    oceania.RawMarketDiagnostics;
               }
-            }
-          }
-          catch (AggregateException ae)
-          {
-            this.plugin.Log.Warning(ae, $"Failed to fetch market data for item {this.selectedItem.Value.RowId} from Universalis.");
 
-            foreach (var ex in ae.InnerExceptions)
+              token.ThrowIfCancellationRequested();
+
+              return (MarketDataResponse?)result;
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
-              this.plugin.Log.Warning(ex, "Inner exception");
+              return null;
             }
+            catch (Exception ex)
+            {
+              if (!token.IsCancellationRequested)
+              {
+                this.plugin.Log.Warning(
+                    ex, $"DMBF market request failed for {itemId} on {scope}.");
+              }
 
-            this.marketData = null;
-          }
+              return null;
+            }
+          },
+          token);
+    }
 
-          if (this.marketData != null)
-          {
-            this.marketDataCache.Add(this.selectedItem.Value.RowId, this.marketData);
-          }
-        },
-        this.currentRefreshCancellationTokenSource.Token);
+    private void CompleteMarketRefresh()
+    {
+      var task = this.currentRefreshTask;
+
+      if (task == null || !task.IsCompleted)
+      {
+        return;
+      }
+
+      this.currentRefreshTask = null;
+
+      if (task.Status != TaskStatus.RanToCompletion)
+      {
+        return;
+      }
+
+      var result = task.Result;
+
+      if (result == null)
+      {
+        return;
+      }
+
+      this.marketDataCache[this.pendingMarketKey] = result;
+      this.marketData = result;
     }
 
     private void StartUniversalisStatusCheckTask(CancellationToken cancellationToken)
     {
       Task.Run(
-        async () =>
-        {
-          while (!cancellationToken.IsCancellationRequested)
+          async () =>
           {
-            this.isUniversalisUp = await this.plugin.UniversalisClient.CheckStatus(cancellationToken).ConfigureAwait(false);
-            await Task.Delay(TimeSpan.FromMinutes(10), cancellationToken).ConfigureAwait(false);
-          }
-        },
-        cancellationToken);
+            while (!cancellationToken.IsCancellationRequested)
+            {
+              try
+              {
+                var centers = await this.plugin.UniversalisClient
+                    .GetDataCenters(cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (centers.Count == 0)
+                {
+                  throw new InvalidOperationException(
+                      "Universalis returned no data centers.");
+                }
+
+                this.dataCenters = centers.ToArray();
+                this.isUniversalisUp = true;
+              }
+              catch (OperationCanceledException)
+                  when (cancellationToken.IsCancellationRequested)
+              {
+                break;
+              }
+              catch (Exception ex)
+              {
+                this.isUniversalisUp = false;
+                this.plugin.Log.Warning(ex, "DMBF world metadata unavailable.");
+              }
+
+              await Task.Delay(
+                  this.isUniversalisUp
+                      ? TimeSpan.FromMinutes(10)
+                      : TimeSpan.FromSeconds(30),
+                  cancellationToken).ConfigureAwait(false);
+            }
+          },
+          cancellationToken);
     }
 
     private string BuildMarketDiagnostics()
@@ -1299,6 +1413,7 @@ namespace MarketBoardPlugin.GUI
 
       sb.AppendLine($"Selected scope: {scope}");
       sb.AppendLine($"Requested scope: {data.RequestScope}");
+      sb.AppendLine($"Current logical DC: {this.GetDcNameFromWorldId((int)this.currentWorldId)}");
 
       if (this.plugin.PlayerState.ContentId != 0)
       {
@@ -1346,7 +1461,7 @@ namespace MarketBoardPlugin.GUI
 
         sb.AppendLine(
             $"{group.Key.WorldName ?? data.WorldName ?? scope} " +
-            $"[ID {group.Key.WorldID}, Game DC {dc}]: " +
+            $"[ID {group.Key.WorldID}, Logical DC {dc}]: " +
             $"{group.Count()} listings, " +
             $"minimum {group.Min(x => x.PricePerUnit)} gil");
       }
@@ -1371,14 +1486,9 @@ namespace MarketBoardPlugin.GUI
 
     private string GetDcNameFromWorldId(int worldId)
     {
-      var world = this.plugin.DataManager.GetExcelSheet<World>().FirstOrNull(w => w.RowId == worldId);
-
-      if (world != null)
-      {
-        return world.Value.DataCenter.Value.Name.ExtractText();
-      }
-
-      return string.Empty;
+      return this.dataCenters
+          .FirstOrDefault(dc => dc.Worlds.Contains((uint)worldId))
+          ?.Name ?? "Unknown DC";
     }
   }
 }

@@ -93,7 +93,35 @@ namespace MarketBoardPlugin.Helpers
           $"?listings={listingCount}&entries={historyCount}\n" +
           MarketDiagnostics.DescribeRawResponse(document.RootElement);
 
-        parsedRes.FetchTimestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+        var returnedScope = parsedRes.WorldName
+            ?? parsedRes.DcName
+            ?? parsedRes.RegionName;
+
+        if (parsedRes.ItemId != itemId
+            || !string.Equals(
+                returnedScope, worldName, StringComparison.OrdinalIgnoreCase))
+        {
+          throw new InvalidOperationException(
+              $"Universalis response mismatch: requested {itemId}/{worldName}, " +
+              $"received {parsedRes.ItemId}/{returnedScope}.");
+        }
+
+        if (parsedRes.WorldId.HasValue)
+        {
+          foreach (var listing in parsedRes.Listings)
+          {
+            listing.WorldID ??= parsedRes.WorldId;
+            listing.WorldName ??= parsedRes.WorldName;
+          }
+
+          foreach (var history in parsedRes.RecentHistory)
+          {
+            history.WorldId ??= parsedRes.WorldId;
+            history.WorldName ??= parsedRes.WorldName;
+          }
+        }
+
+        parsedRes.FetchTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         return parsedRes;
       }
       catch (HttpRequestException ex)
