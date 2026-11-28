@@ -211,11 +211,11 @@
   "Name": "DashsMarketBoardFork",
   "InternalName": "DashsMarketBoardFork",
   "AssemblyVersion": "0.0.0.0",
-  "TestingAssemblyVersion": "0.1.0.0",
+  "TestingAssemblyVersion": "0.1.0.1",
   "Description": "A maintained fork of fmauNeko's Market Board plugin focused on reliable Universalis listings and accurate cross-world market information. /dmbf to open.",
   "Punchline": "Your reliable Market Board companion.",
   "Changelog": "Testing-exclusive development.",
-  "TestingChangelog": "DEV1: Initial upstream integration and market diagnostics.",
+  "TestingChangelog": "DEV2: Fixed incorrect Cross-World market scopes following patch 7.58, added dynamic Universalis world and logical DC resolution, corrected world assignments, improved World Visit detection, isolated market caches by search scope, prevented outdated asynchronous responses, and improved market diagnostics.",
   "ApplicableVersion": "any",
   "Tags": [
     "market",
@@ -236,6 +236,7 @@
   "IsTestingExclusive": true,
   "DownloadLinkInstall": "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/DashsMarketBoardFork/latest.zip",
   "DownloadLinkUpdate": "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/DashsMarketBoardFork/latest.zip",
-  "DownloadLinkTesting": "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/DashsMarketBoardFork/latest.zip"
+  "DownloadLinkTesting": "https://raw.githubusercontent.com/420Dasher/Dashs-Plugins/testing/plugins/DashsMarketBoardFork/latest.zip",
+  "LastUpdate": 1795899160
 }
 ]
